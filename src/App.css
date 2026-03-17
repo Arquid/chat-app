@@ -1,0 +1,54 @@
+.App {
+  text-align: center;
+  padding: 20px;
+  font-family: sans-serif;
+}
+
+.chat {
+  position: relative;
+  width: 350px;
+  margin: 0 auto;
+  border: 1px solid #ccc;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.messages {
+  margin-top: 20px;
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid #ccc;
+  padding: 10px;
+}
+
+.message {
+  margin-bottom: 10px;
+  text-align: left;
+}
+
+.timestamp {
+  display: block;
+  font-size: 12px;
+  color: #888;
+  margin-top: 2px;
+}
+
+.input-area {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  position: relative;
+  margin-top: 10px;
+}
+
+.sent-image {
+  max-width: 100%;
+  margin-top: 10px;
+}
+
+.emoji-picker {
+  position: absolute;
+  bottom: 60px;
+  left: 0;
+  z-index: 1000;
+}
