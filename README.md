@@ -19,19 +19,33 @@ A modern, real-time chat application built with **React**, **Socket.io**, and **
 
 ## Installation
 
-### 1. Server Setup
+This is a single project with both the client (`src/`) and server (`server/`) in the same `package.json`.
 
 ```bash
-cd server
-npm install express socket.io cors multer
-node index.js
+npm install
 ```
 
-### 2. Client setup
+### Environment variables
+
+Copy `.env.example` to `.env` and adjust as needed:
 
 ```bash
-cd client
-npm install react react-dom socket.io-client emoji-picker-react uuid
+cp .env.example .env
+```
+
+| Variable | Used by | Description |
+|---|---|---|
+| `PORT` | server | Port the Express/Socket.io server listens on (default `5000`) |
+| `CLIENT_ORIGIN` | server | Allowed CORS origin for HTTP and Socket.io requests (default `http://localhost:5173`) |
+| `VITE_SERVER_URL` | client | Base URL the browser uses to reach the server (default `http://localhost:5000`) |
+
+### Run
+
+```bash
+# Terminal 1 - server
+node server/index.js
+
+# Terminal 2 - client
 npm run dev
 ```
 

@@ -3,6 +3,8 @@ import io from "socket.io-client";
 import Picker from "emoji-picker-react";
 import { v4 as uuidv4 } from "uuid";
 
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
+
 function Chat({ username }) {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
@@ -19,25 +21,17 @@ function Chat({ username }) {
 
   const MAX_FILE_SIZE = 2 * 1024 * 1024;
   const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+  const MAX_TEXT_LENGTH = 2000;
 
-  // --- Socket.io setup ---
   useEffect(() => {
-    socketRef.current = io("http://localhost:5000", {
+    socketRef.current = io(SERVER_URL, {
       reconnectionAttempts: 5,
       timeout: 5000,
-    });
-
-    socketRef.current.on("connect", () => {
-      console.log("Connected to server:", socketRef.current.id);
     });
 
     socketRef.current.on("connect_error", (err) => {
       console.error("Socket connection error:", err);
       alert("Failed to connect to chat server. Please refresh.");
-    });
-
-    socketRef.current.on("disconnect", (reason) => {
-      console.log("Disconnected:", reason);
     });
 
     socketRef.current.on("initialMessages", (messages) => setMessages(messages));
@@ -48,12 +42,10 @@ function Chat({ username }) {
     };
   }, []);
 
-  // --- Scroll to bottom ---
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // --- Emoji picker click outside ---
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target)) {
@@ -70,7 +62,6 @@ function Chat({ username }) {
     };
   }, [showEmojiPicker]);
 
-  // --- Add emoji to message ---
   const onEmojiClick = (emoji) => {
     setMessage((prev) => prev + emoji.emoji);
   };
@@ -101,7 +92,6 @@ function Chat({ username }) {
     setUploadError("");
   };
 
-  // --- Upload image to server ---
   const uploadImage = async (file) => {
     setUploading(true);
     setUploadError("");
@@ -109,7 +99,7 @@ function Chat({ username }) {
       const formData = new FormData();
       formData.append("image", file);
 
-      const response = await fetch("http://localhost:5000/upload", {
+      const response = await fetch(`${SERVER_URL}/upload`, {
         method: "POST",
         body: formData,
       });
@@ -130,7 +120,6 @@ function Chat({ username }) {
     }
   };
 
-  // --- Send message ---
   const sendMessage = async () => {
     if (!message.trim() && !image) return;
 
@@ -164,7 +153,9 @@ function Chat({ username }) {
         {messages.map((msg) => (
           <div key={msg.id} className="message">
             <strong>{msg.username}</strong>: {msg.text}
-            {msg.image && <img src={msg.image} alt="Uploaded" className="sent-image" />}
+            {msg.image && (
+              <img src={`${SERVER_URL}${msg.image}`} alt="Uploaded" className="sent-image" />
+            )}
             {msg.timestamp && (
               <span className="timestamp">{new Date(msg.timestamp).toLocaleTimeString()}</span>
             )}
@@ -193,6 +184,7 @@ function Chat({ username }) {
           type="text"
           placeholder="Type a message..."
           value={message}
+          maxLength={MAX_TEXT_LENGTH}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") sendMessage();

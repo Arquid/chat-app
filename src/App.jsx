@@ -20,7 +20,11 @@ function App() {
             type="text"
             placeholder="Enter your username"
             value={username}
+            maxLength={50}
             onChange={(e) => setUsername(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleLogin();
+            }}
           />
           <button onClick={handleLogin}>Login</button>
         </div>
