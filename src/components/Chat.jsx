@@ -41,6 +41,9 @@ function Chat({ username, token, onLogout }) {
 
     socketRef.current.on("initialMessages", (messages) => setMessages(messages));
     socketRef.current.on("receiveMessage", (message) => setMessages((prev) => [...prev, message]));
+    socketRef.current.on("rateLimitExceeded", (data) => {
+      setUploadError(data.message);
+    });
 
     return () => {
       socketRef.current.disconnect();

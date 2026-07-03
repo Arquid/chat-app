@@ -5,6 +5,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
+import rateLimit from "express-rate-limit";
 import { registerUser, loginUser, verifyToken } from "./users.js";
 
 const PORT = Number(process.env.PORT) || 5000;
@@ -28,6 +29,22 @@ const MIME_TO_EXT = {
 
 const USERNAME_REGEX = /^[a-zA-Z0-9_-]{3,20}$/;
 
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many attempts, please try again later" }
+});
+
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many uploads, please try again later" }
+});
+
 const storage = multer.diskStorage({
   destination: "uploads/",
   filename: (req, file, cb) => {
@@ -48,7 +65,7 @@ const upload = multer({
   },
 });
 
-app.post("/auth/register", async (req, res) => {
+app.post("/auth/register", authLimiter, async (req, res) => {
   const { username, password } = req.body || {};
 
   if (typeof username !== "string" || !USERNAME_REGEX.test(username)) {
@@ -66,7 +83,7 @@ app.post("/auth/register", async (req, res) => {
   }
 });
 
-app.post("/auth/login", async (req, res) => {
+app.post("/auth/login", authLimiter, async (req, res) => {
   const { username, password } = req.body || {};
 
   if (typeof username !== "string" || typeof password !== "string") {
@@ -96,7 +113,7 @@ function authenticate(req, res, next) {
   }
 }
 
-app.post("/upload", authenticate, (req, res) => {
+app.post("/upload", uploadLimiter, authenticate, (req, res) => {
   upload.single("image")(req, res, (error) => {
     if (error) {
       return res.status(400).json({ error: error.message });
@@ -140,9 +157,25 @@ function isValidMessage(message) {
 }
 
 io.on('connection', (socket) => {
+  const MESSAGE_RATE_LIMIT = 5;
+  const MESSAGE_RATE_WINDOW_MS = 10000;
+  const messageTimestamps = [];
+
   socket.emit("initialMessages", messages);
 
   socket.on("sendMessage", (message) => {
+    const now = Date.now();
+    while (messageTimestamps.length && now - messageTimestamps[0] > MESSAGE_RATE_WINDOW_MS) {
+      messageTimestamps.shift();
+    }
+
+    if (messageTimestamps.length >= MESSAGE_RATE_LIMIT) {
+      socket.emit("rateLimitExceeded", { message: "You're sending messages too fast" });
+      return;
+    }
+
+    messageTimestamps.push(now);
+
     if (!isValidMessage(message)) return;
 
     const safeMessage = {
