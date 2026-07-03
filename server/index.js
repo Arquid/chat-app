@@ -5,11 +5,11 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
+import { registerUser, loginUser, verifyToken } from "./users.js";
 
 const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 
-const MAX_USERNAME_LENGTH = 50;
 const MAX_TEXT_LENGTH = 2000;
 const MAX_HISTORY = 200;
 
@@ -25,6 +25,8 @@ const MIME_TO_EXT = {
   "image/png": ".png",
   "image/webp": ".webp",
 };
+
+const USERNAME_REGEX = /^[a-zA-Z0-9_-]{3,20}$/;
 
 const storage = multer.diskStorage({
   destination: "uploads/",
@@ -46,7 +48,55 @@ const upload = multer({
   },
 });
 
-app.post("/upload", (req, res) => {
+app.post("/auth/register", async (req, res) => {
+  const { username, password } = req.body || {};
+
+  if (typeof username !== "string" || !USERNAME_REGEX.test(username)) {
+    return res.status(400).json({ error: "Username must be 3-20 characters (letters, numbers, _ or -)" });
+  }
+  if (typeof password !== "string" || password.length < 8) {
+    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  }
+
+  try {
+    const token = await registerUser(username, password);
+    res.json({ token, username });
+  } catch (error) {
+    res.status(409).json({ error: error.message });
+  }
+});
+
+app.post("/auth/login", async (req, res) => {
+  const { username, password } = req.body || {};
+
+  if (typeof username !== "string" || typeof password !== "string") {
+    return res.status(400).json({ error: "Username and password required" });
+  }
+
+  try {
+    const token = await loginUser(username, password);
+    res.json({ token, username });
+  } catch (error) {
+    res.status(401).json({ error: error.message });
+  }
+});
+
+function authenticate(req, res, next) {
+  const header = req.headers.authorization;
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+  try {
+    req.user = verifyToken(token);
+    next();
+  } catch {
+    res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+app.post("/upload", authenticate, (req, res) => {
   upload.single("image")(req, res, (error) => {
     if (error) {
       return res.status(400).json({ error: error.message });
@@ -68,12 +118,20 @@ const io = new Server(server, {
   },
 });
 
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) return next(new Error("Authentication required"));
+  try {
+    socket.data.username = verifyToken(token).username;
+    next();
+  } catch {
+    next(new Error("Invalid or expired token"));
+  }
+});
+
 function isValidMessage(message) {
   return (
     message &&
-    typeof message.username === "string" &&
-    message.username.trim().length > 0 &&
-    message.username.length <= MAX_USERNAME_LENGTH &&
     typeof message.text === "string" &&
     message.text.length <= MAX_TEXT_LENGTH &&
     (message.text.trim().length > 0 || typeof message.image === "string") &&
@@ -89,7 +147,7 @@ io.on('connection', (socket) => {
 
     const safeMessage = {
       id: uuidv4(),
-      username: message.username.trim().slice(0, MAX_USERNAME_LENGTH),
+      username: socket.data.username,
       text: message.text.trim().slice(0, MAX_TEXT_LENGTH),
       image: message.image || null,
       timestamp: new Date().toISOString(),

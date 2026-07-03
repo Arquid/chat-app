@@ -1,11 +1,10 @@
 import { useEffect, useState, useRef } from "react";
 import io from "socket.io-client";
 import Picker from "emoji-picker-react";
-import { v4 as uuidv4 } from "uuid";
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
 
-function Chat({ username }) {
+function Chat({ username, token, onLogout }) {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -25,12 +24,18 @@ function Chat({ username }) {
 
   useEffect(() => {
     socketRef.current = io(SERVER_URL, {
+      auth: { token },
       reconnectionAttempts: 5,
       timeout: 5000,
     });
 
     socketRef.current.on("connect_error", (err) => {
       console.error("Socket connection error:", err);
+      if (err.message === "Authentication required" || err.message === "Invalid or expired token") {
+        alert("Your session has expired. Please log in again.");
+        onLogout();
+        return;
+      }
       alert("Failed to connect to chat server. Please refresh.");
     });
 
@@ -40,7 +45,7 @@ function Chat({ username }) {
     return () => {
       socketRef.current.disconnect();
     };
-  }, []);
+  }, [token, onLogout]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -101,6 +106,7 @@ function Chat({ username }) {
 
       const response = await fetch(`${SERVER_URL}/upload`, {
         method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
@@ -130,11 +136,8 @@ function Chat({ username }) {
     }
 
     const msgData = {
-      id: uuidv4(),
-      username,
       text: message,
       image: imageUrl,
-      timestamp: new Date().toISOString(),
     };
 
     socketRef.current.emit("sendMessage", msgData);
@@ -148,7 +151,10 @@ function Chat({ username }) {
 
   return (
     <div className="chat">
-      <h2>Chat</h2>
+      <div className="chat-header">
+        <h2>Chat — {username}</h2>
+        <button onClick={onLogout}>Logout</button>
+      </div>
       <div className="messages">
         {messages.map((msg) => (
           <div key={msg.id} className="message">
