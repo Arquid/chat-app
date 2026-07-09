@@ -23,6 +23,7 @@ uploads/*
 
 # User credentials store
 server/users.json
+server/messages.json
 
 # Editor directories and files
 .vscode/*
@@ -34,3 +35,4 @@ server/users.json
 *.njsproj
 *.sln
 *.sw?
+.claude/*

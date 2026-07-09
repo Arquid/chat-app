@@ -9,6 +9,7 @@ A real-time chat application built with **React**, **Socket.io**, and **Node.js/
 - **Image uploads** (JPEG, PNG, WEBP, max 2MB) with live preview and loading indicator
 - **Emoji picker** integration (`emoji-picker-react`)
 - **Rate limiting** on login/register, uploads, and outgoing messages to curb abuse
+- **Persistent chat history** — the last 200 messages survive a server restart
 - Server-side validation of message length and content — the server, not the client, decides who sent what
 - Automatic scrolling to the newest message, connection/disconnection handling, and error alerts
 
@@ -28,10 +29,16 @@ This is a single project — both the client (`src/`) and the server (`server/`)
 
 ```
 src/            React client (Vite)
+  __tests__/            App-level tests
+  components/__tests__/ Chat component tests
 server/
   index.js      Express + Socket.io server
   users.js      User registration/login, password hashing, JWT helpers
   users.json    User store (created at runtime, not committed)
+  messages.js   Chat history persistence
+  messages.json Chat history store (created at runtime, not committed)
+  validation.js Shared input validation (username, password, message)
+  __tests__/    Server-side tests
 uploads/        Uploaded images (not committed)
 ```
 
@@ -71,6 +78,15 @@ node server/index.js
 npm run dev
 ```
 
+### Tests
+
+```bash
+npm test          # run once
+npm run test:watch # watch mode
+```
+
+Covers server-side auth/validation/persistence logic (`server/__tests__/`) and client-side login/register and chat behavior (`src/__tests__/`, `src/components/__tests__/`), using [Vitest](https://vitest.dev/) and [React Testing Library](https://testing-library.com/react).
+
 ## Usage
 
 1. Open the app in your browser and register an account (username 3-20 characters, password 8+ characters), or log in if you already have one
@@ -89,6 +105,5 @@ npm run dev
 
 ## Known limitations
 
-- Chat history is kept in memory only (last 200 messages) and is lost on server restart — there is no database
 - JWTs cannot be revoked server-side; logging out only discards the token on the client, it stays valid until it expires (7 days)
-- No automated test suite yet
+- Chat history (last 200 messages) and user accounts are stored as JSON files on disk rather than in a real database — this survives a server restart but won't hold up under concurrent writes at higher traffic

@@ -6,12 +6,14 @@ import cors from 'cors';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import rateLimit from "express-rate-limit";
+
 import { registerUser, loginUser, verifyToken } from "./users.js";
+import { loadMessages, saveMessages } from "./messages.js";
+import { isValidUsername, isValidPassword, isValidMessage, MAX_TEXT_LENGTH } from "./validation.js";
 
 const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 
-const MAX_TEXT_LENGTH = 2000;
 const MAX_HISTORY = 200;
 
 const app = express();
@@ -19,15 +21,13 @@ app.use(cors({ origin: CLIENT_ORIGIN }));
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
-let messages = [];
+let messages = loadMessages();
 
 const MIME_TO_EXT = {
   "image/jpeg": ".jpg",
   "image/png": ".png",
   "image/webp": ".webp",
 };
-
-const USERNAME_REGEX = /^[a-zA-Z0-9_-]{3,20}$/;
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -68,10 +68,10 @@ const upload = multer({
 app.post("/auth/register", authLimiter, async (req, res) => {
   const { username, password } = req.body || {};
 
-  if (typeof username !== "string" || !USERNAME_REGEX.test(username)) {
+  if (!isValidUsername(username)) {
     return res.status(400).json({ error: "Username must be 3-20 characters (letters, numbers, _ or -)" });
   }
-  if (typeof password !== "string" || password.length < 8) {
+  if (!isValidPassword(password)) {
     return res.status(400).json({ error: "Password must be at least 8 characters" });
   }
 
@@ -146,16 +146,6 @@ io.use((socket, next) => {
   }
 });
 
-function isValidMessage(message) {
-  return (
-    message &&
-    typeof message.text === "string" &&
-    message.text.length <= MAX_TEXT_LENGTH &&
-    (message.text.trim().length > 0 || typeof message.image === "string") &&
-    (message.image === null || message.image === undefined || typeof message.image === "string")
-  );
-}
-
 io.on('connection', (socket) => {
   const MESSAGE_RATE_LIMIT = 5;
   const MESSAGE_RATE_WINDOW_MS = 10000;
@@ -165,6 +155,7 @@ io.on('connection', (socket) => {
 
   socket.on("sendMessage", (message) => {
     const now = Date.now();
+
     while (messageTimestamps.length && now - messageTimestamps[0] > MESSAGE_RATE_WINDOW_MS) {
       messageTimestamps.shift();
     }
@@ -190,6 +181,8 @@ io.on('connection', (socket) => {
     if (messages.length > MAX_HISTORY) {
       messages = messages.slice(-MAX_HISTORY);
     }
+
+    saveMessages(messages);
 
     io.emit("receiveMessage", safeMessage);
   });
