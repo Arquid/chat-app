@@ -1,5 +1,7 @@
 # React Real-Time Chat App
 
+[![CI](https://github.com/Arquid/chat-app/actions/workflows/ci.yml/badge.svg)](https://github.com/Arquid/chat-app/actions/workflows/ci.yml)
+
 A real-time chat application built with **React**, **Socket.io**, and **Node.js/Express**. Supports user accounts, image uploads, emoji reactions, and rate-limited messaging.
 
 ## Features
@@ -86,6 +88,8 @@ npm run test:watch # watch mode
 ```
 
 Covers server-side auth/validation/persistence logic (`server/__tests__/`) and client-side login/register and chat behavior (`src/__tests__/`, `src/components/__tests__/`), using [Vitest](https://vitest.dev/) and [React Testing Library](https://testing-library.com/react).
+
+Lint, tests, and build run automatically on every push and pull request to `main` via GitHub Actions (see `.github/workflows/ci.yml`, tested against Node 18.x and 20.x).
 
 ## Usage
 
