@@ -9,12 +9,15 @@ import rateLimit from "express-rate-limit";
 
 import { registerUser, loginUser, verifyToken } from "./users.js";
 import { loadMessages, saveMessages } from "./messages.js";
-import { isValidUsername, isValidPassword, isValidMessage, MAX_TEXT_LENGTH } from "./validation.js";
+import { loadRooms, saveRooms } from "./rooms.js";
+import { isValidUsername, isValidPassword, isValidMessage, isValidRoomName, MAX_TEXT_LENGTH } from "./validation.js";
 
 const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 
 const MAX_HISTORY = 200;
+const MAX_ROOMS = 50;
+let rooms = loadRooms();
 
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGIN }));
@@ -64,6 +67,20 @@ const upload = multer({
     }
   },
 });
+
+function trimRoomHistory(room) {
+  const roomMessages = messages.filter((m) => m.room === room);
+  if (roomMessages.length <= MAX_HISTORY) return;
+
+  let overflow = roomMessages.length - MAX_HISTORY;
+  messages = messages.filter((m) => {
+    if (m.room === room && overflow > 0) {
+      overflow--;
+      return false;
+    }
+    return true;
+  });
+}
 
 app.post("/auth/register", authLimiter, async (req, res) => {
   const { username, password } = req.body || {};
@@ -151,7 +168,50 @@ io.on('connection', (socket) => {
   const MESSAGE_RATE_WINDOW_MS = 10000;
   const messageTimestamps = [];
 
-  socket.emit("initialMessages", messages);
+  const defaultRoom = rooms.includes("general") ? "general" : rooms[0];
+  socket.data.currentRoom = defaultRoom;
+  socket.join(defaultRoom);
+
+  socket.emit("roomList", rooms);
+  socket.emit("roomMessages", {
+    room: defaultRoom,
+    messages: messages.filter((m) => m.room === defaultRoom),
+  });
+
+  socket.on("createRoom", (roomName) => {
+    if (!isValidRoomName(roomName)) {
+      socket.emit("roomError", { message: "Room names must be 2-30 characters (letters, numbers, _ or -)" });
+      return;
+    }
+    if (rooms.some((r) => r.toLowerCase() === roomName.toLowerCase())) {
+      socket.emit("roomError", { message: "Room already exists" });
+      return;
+    }
+    if (rooms.length >= MAX_ROOMS) {
+      socket.emit("roomError", { message: "Room limit reached" });
+      return;
+    }
+
+    rooms.push(roomName);
+    saveRooms(rooms);
+    io.emit("roomList", rooms);
+  });
+
+  socket.on("joinRoom", (roomName) => {
+    if (!rooms.includes(roomName)) {
+      socket.emit("roomError", { message: "No such room" });
+      return;
+    }
+
+    socket.leave(socket.data.currentRoom);
+    socket.data.currentRoom = roomName;
+    socket.join(roomName);
+
+    socket.emit("roomMessages", {
+      room: roomName,
+      messages: messages.filter((m) => m.room === roomName),
+    });
+  });
 
   socket.on("sendMessage", (message) => {
     const now = Date.now();
@@ -169,8 +229,11 @@ io.on('connection', (socket) => {
 
     if (!isValidMessage(message)) return;
 
+    const room = socket.data.currentRoom;
+
     const safeMessage = {
       id: uuidv4(),
+      room,
       username: socket.data.username,
       text: message.text.trim().slice(0, MAX_TEXT_LENGTH),
       image: message.image || null,
@@ -178,13 +241,10 @@ io.on('connection', (socket) => {
     };
 
     messages.push(safeMessage);
-    if (messages.length > MAX_HISTORY) {
-      messages = messages.slice(-MAX_HISTORY);
-    }
-
+    trimRoomHistory(room);
     saveMessages(messages);
 
-    io.emit("receiveMessage", safeMessage);
+    io.to(room).emit("receiveMessage", safeMessage);
   });
 });
 

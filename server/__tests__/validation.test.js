@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isValidUsername, isValidPassword, isValidMessage, MAX_TEXT_LENGTH } from "../validation.js";
+import { isValidUsername, isValidPassword, isValidMessage, isValidRoomName, MAX_TEXT_LENGTH } from "../validation.js";
 
 describe("isValidUsername", () => {
   it("accepts 3-20 alphanumeric/underscore/hyphen characters", () => {
@@ -73,5 +73,30 @@ describe("isValidMessage", () => {
   it("rejects null/undefined messages", () => {
     expect(isValidMessage(null)).toBe(false);
     expect(isValidMessage(undefined)).toBe(false);
+  });
+});
+
+describe("isValidRoomName", () => {
+  it("accepts 2-30 alphanumeric/underscore/hyphen characters", () => {
+    expect(isValidRoomName("general")).toBe(true);
+    expect(isValidRoomName("ab")).toBe(true);
+    expect(isValidRoomName("a".repeat(30))).toBe(true);
+    expect(isValidRoomName("room_name-1")).toBe(true);
+  });
+
+  it("rejects names shorter than 2 or longer than 30 characters", () => {
+    expect(isValidRoomName("a")).toBe(false);
+    expect(isValidRoomName("a".repeat(31))).toBe(false);
+  });
+
+  it("rejects names with disallowed characters anywhere in the string", () => {
+    expect(isValidRoomName("ab<script>alert(1)</script>")).toBe(false);
+    expect(isValidRoomName("room name")).toBe(false);
+  });
+
+  it("rejects non-string input", () => {
+    expect(isValidRoomName(undefined)).toBe(false);
+    expect(isValidRoomName(123)).toBe(false);
+    expect(isValidRoomName(null)).toBe(false);
   });
 });
