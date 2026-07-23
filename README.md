@@ -46,7 +46,7 @@ uploads/        Uploaded images (not committed)
 
 ## Prerequisites
 
-- Node.js >= 18
+- Node.js >= 20.12 (Vite 8's rolldown bundler requires `node:util`'s `styleText`, unavailable on Node 18)
 - npm
 
 ## Getting started
@@ -89,7 +89,7 @@ npm run test:watch # watch mode
 
 Covers server-side auth/validation/persistence logic (`server/__tests__/`) and client-side login/register and chat behavior (`src/__tests__/`, `src/components/__tests__/`), using [Vitest](https://vitest.dev/) and [React Testing Library](https://testing-library.com/react).
 
-Lint, tests, and build run automatically on every push and pull request to `main` via GitHub Actions (see `.github/workflows/ci.yml`, tested against Node 18.x and 20.x).
+Lint, tests, and build run automatically on every push and pull request to `main` via GitHub Actions (see `.github/workflows/ci.yml`, tested against Node 20.x and 22.x).
 
 ## Usage
 
