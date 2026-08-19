@@ -203,6 +203,8 @@ io.on('connection', (socket) => {
       return;
     }
 
+    socket.to(socket.data.currentRoom).emit("userStoppedTyping", { username: socket.data.username });
+
     socket.leave(socket.data.currentRoom);
     socket.data.currentRoom = roomName;
     socket.join(roomName);
@@ -245,6 +247,18 @@ io.on('connection', (socket) => {
     saveMessages(messages);
 
     io.to(room).emit("receiveMessage", safeMessage);
+  });
+
+  socket.on("disconnect", () => {
+    socket.to(socket.data.currentRoom).emit("userStoppedTyping", { username: socket.data.username });
+  });
+
+  socket.on("typing", () => {
+    socket.to(socket.data.currentRoom).emit("userTyping", { username: socket.data.username });
+  });
+
+  socket.on("stopTyping", () => {
+    socket.to(socket.data.currentRoom).emit("userStoppedTyping", { username: socket.data.username });
   });
 });
 

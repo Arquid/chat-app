@@ -16,16 +16,19 @@ function Chat({ username, token, onLogout }) {
   const [currentRoom, setCurrentRoom] = useState("general");
   const [newRoomName, setNewRoomName] = useState("");
   const [roomError, setRoomError] = useState("");
+  const [typingUsers, setTypingUsers] = useState([]);
 
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
   const socketRef = useRef(null);
   const emojiPickerRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
 
   const MAX_FILE_SIZE = 2 * 1024 * 1024;
   const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
   const MAX_TEXT_LENGTH = 2000;
   const ERROR_DISPLAY_MS = 4000;
+  const TYPING_TIMEOUT_MS = 2000;
 
   useEffect(() => {
     socketRef.current = io(SERVER_URL, {
@@ -48,14 +51,22 @@ function Chat({ username, token, onLogout }) {
     socketRef.current.on("roomMessages", ({ room, messages }) => {
       setCurrentRoom(room);
       setMessages(messages);
+      setTypingUsers([]);
     });
     socketRef.current.on("roomError", (data) => setRoomError(data.message));
+    socketRef.current.on("userTyping", ({ username: typingUsername }) => {
+      setTypingUsers((prev) => (prev.includes(typingUsername) ? prev : [...prev, typingUsername]));
+    });
+    socketRef.current.on("userStoppedTyping", ({ username: typingUsername }) => {
+      setTypingUsers((prev) => prev.filter((u) => u !== typingUsername));
+    });
     socketRef.current.on("receiveMessage", (message) => setMessages((prev) => [...prev, message]));
     socketRef.current.on("rateLimitExceeded", (data) => {
       setUploadError(data.message);
     });
 
     return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       socketRef.current.disconnect();
     };
   }, [token, onLogout]);
@@ -152,6 +163,11 @@ function Chat({ username, token, onLogout }) {
 
   const sendMessage = async () => {
     if (!message.trim() && !image) return;
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    socketRef.current.emit("stopTyping");
 
     let imageUrl = null;
     if (image) {
@@ -184,6 +200,17 @@ function Chat({ username, token, onLogout }) {
     setRoomError("");
     socketRef.current.emit("createRoom", newRoomName.trim());
     setNewRoomName("");
+  };
+
+  const handleMessageChange = (e) => {
+    setMessage(e.target.value);
+
+    socketRef.current.emit("typing");
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      socketRef.current.emit("stopTyping");
+    }, TYPING_TIMEOUT_MS);
   };
 
   return (
@@ -235,6 +262,13 @@ function Chat({ username, token, onLogout }) {
           <div ref={chatEndRef} />
         </div>
 
+        {typingUsers.length > 0 && (
+          <p className="typing-indicator">
+            {typingUsers.length === 1
+              ? `${typingUsers[0]} is typing...`
+              : `${typingUsers.join(", ")} are typing...`}
+          </p>
+        )}
         {showEmojiPicker && (
           <div ref={emojiPickerRef} className="emoji-picker">
             <Picker onEmojiClick={onEmojiClick} />
@@ -256,7 +290,7 @@ function Chat({ username, token, onLogout }) {
             placeholder="Type a message..."
             value={message}
             maxLength={MAX_TEXT_LENGTH}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={handleMessageChange}
             onKeyDown={(e) => {
               if (e.key === "Enter") sendMessage();
             }}

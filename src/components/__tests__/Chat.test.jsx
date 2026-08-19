@@ -237,3 +237,116 @@ describe("Rooms", () => {
     }
   });
 });
+
+describe("Typing indicator", () => {
+  it("shows nothing by default", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    expect(screen.queryByText(/is typing/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/are typing/)).not.toBeInTheDocument();
+  });
+
+  it("shows a single typing user", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    act(() => {
+      handlers.userTyping({ username: "bob" });
+    });
+    expect(screen.getByText("bob is typing...")).toBeInTheDocument();
+  });
+
+  it("shows multiple typing users without duplicates", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    act(() => {
+      handlers.userTyping({ username: "bob" });
+      handlers.userTyping({ username: "carol" });
+      handlers.userTyping({ username: "bob" }); // repeat keystroke, should not duplicate
+    });
+    expect(screen.getByText("bob, carol are typing...")).toBeInTheDocument();
+  });
+
+  it("removes a user once userStoppedTyping arrives", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    act(() => {
+      handlers.userTyping({ username: "bob" });
+      handlers.userTyping({ username: "carol" });
+    });
+    act(() => {
+      handlers.userStoppedTyping({ username: "bob" });
+    });
+    expect(screen.queryByText(/bob/)).not.toBeInTheDocument();
+    expect(screen.getByText("carol is typing...")).toBeInTheDocument();
+  });
+
+  it("clears typing users when switching rooms", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    act(() => {
+      handlers.userTyping({ username: "bob" });
+    });
+    expect(screen.getByText("bob is typing...")).toBeInTheDocument();
+
+    act(() => {
+      handlers.roomMessages({ room: "random", messages: [] });
+    });
+    expect(screen.queryByText(/bob/)).not.toBeInTheDocument();
+  });
+
+  it("emits typing while the user types", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    const input = screen.getByPlaceholderText("Type a message...");
+
+    fireEvent.change(input, { target: { value: "h" } });
+
+    expect(mockSocket.emit).toHaveBeenCalledWith("typing");
+  });
+
+  it("emits stopTyping after a pause in typing", () => {
+    vi.useFakeTimers();
+    try {
+      render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+      const input = screen.getByPlaceholderText("Type a message...");
+
+      fireEvent.change(input, { target: { value: "hi" } });
+      expect(mockSocket.emit).not.toHaveBeenCalledWith("stopTyping");
+
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(mockSocket.emit).toHaveBeenCalledWith("stopTyping");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not emit stopTyping early if the user keeps typing", () => {
+    vi.useFakeTimers();
+    try {
+      render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+      const input = screen.getByPlaceholderText("Type a message...");
+
+      fireEvent.change(input, { target: { value: "h" } });
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+      fireEvent.change(input, { target: { value: "hi" } });
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+
+      // 3000ms have passed in total, but the debounce timer was reset at 1500ms,
+      // so the 2000ms timeout should not have fired yet.
+      expect(mockSocket.emit).not.toHaveBeenCalledWith("stopTyping");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("emits stopTyping immediately when a message is sent", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    const input = screen.getByPlaceholderText("Type a message...");
+
+    fireEvent.change(input, { target: { value: "hello" } });
+    mockSocket.emit.mockClear();
+    fireEvent.click(screen.getByText("Send"));
+
+    expect(mockSocket.emit).toHaveBeenCalledWith("stopTyping");
+  });
+});
