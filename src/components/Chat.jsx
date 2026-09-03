@@ -17,6 +17,7 @@ function Chat({ username, token, onLogout }) {
   const [newRoomName, setNewRoomName] = useState("");
   const [roomError, setRoomError] = useState("");
   const [typingUsers, setTypingUsers] = useState([]);
+  const [roomUsers, setRoomUsers] = useState([]);
 
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
@@ -52,7 +53,9 @@ function Chat({ username, token, onLogout }) {
       setCurrentRoom(room);
       setMessages(messages);
       setTypingUsers([]);
+      setRoomUsers([]);
     });
+    socketRef.current.on("roomUsers", ({ users }) => setRoomUsers(users));
     socketRef.current.on("roomError", (data) => setRoomError(data.message));
     socketRef.current.on("userTyping", ({ username: typingUsername }) => {
       setTypingUsers((prev) => (prev.includes(typingUsername) ? prev : [...prev, typingUsername]));
@@ -229,7 +232,7 @@ function Chat({ username, token, onLogout }) {
             </li>
           ))}
         </ul>
-        <form onSubmit={createRoom}>
+        <form className="create-room-form" onSubmit={createRoom}>
           <input
             type="text"
             placeholder="New room name"
@@ -239,24 +242,39 @@ function Chat({ username, token, onLogout }) {
           />
           <button type="submit">+ Create</button>
         </form>
-        {roomError && <p style={{ color: "red" }}>{roomError}</p>}
+        {roomError && <p className="error-text">{roomError}</p>}
       </div>
 
       <div className="chat-main">
         <div className="chat-header">
           <h2>Chat — #{currentRoom} — {username}</h2>
-          <button onClick={onLogout}>Logout</button>
+          <button className="logout-button" onClick={onLogout}>Logout</button>
+        </div>
+        <div className="room-users">
+          <span className="online-dot" aria-hidden="true" />
+          <strong>Online ({roomUsers.length}):</strong> {roomUsers.join(", ")}
         </div>
         <div className="messages">
           {messages.map((msg) => (
-            <div key={msg.id} className="message">
-              <strong>{msg.username}</strong>: {msg.text}
-              {msg.image && (
-                <img src={`${SERVER_URL}${msg.image}`} alt="Uploaded" className="sent-image" />
-              )}
-              {msg.timestamp && (
-                <span className="timestamp">{new Date(msg.timestamp).toLocaleTimeString()}</span>
-              )}
+            <div
+              key={msg.id}
+              className={`message ${msg.username === username ? "own-message" : "other-message"}`}
+            >
+              <div className="message-avatar" aria-hidden="true">
+                {msg.username.charAt(0).toUpperCase()}
+              </div>
+              <div className="message-bubble">
+                <div className="message-meta">
+                  <strong>{msg.username}</strong>
+                  {msg.timestamp && (
+                    <span className="timestamp">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                  )}
+                </div>
+                {msg.text && <div className="message-text">{msg.text}</div>}
+                {msg.image && (
+                  <img src={`${SERVER_URL}${msg.image}`} alt="Uploaded" className="sent-image" />
+                )}
+              </div>
             </div>
           ))}
           <div ref={chatEndRef} />
@@ -277,6 +295,7 @@ function Chat({ username, token, onLogout }) {
 
         <div className="input-area">
           <button
+            className="icon-button"
             onClick={(e) => {
               e.stopPropagation();
               setShowEmojiPicker((prev) => !prev);
@@ -302,14 +321,14 @@ function Chat({ username, token, onLogout }) {
             style={{ display: "none" }}
             onChange={handleFileChange}
           />
-          <button onClick={() => fileInputRef.current.click()}>📎</button>
-          <button onClick={sendMessage} disabled={uploading}>
+          <button className="icon-button" onClick={() => fileInputRef.current.click()}>📎</button>
+          <button className="send-button" onClick={sendMessage} disabled={uploading}>
             Send
           </button>
         </div>
 
-        {uploading && <p>Uploading image...</p>}
-        {uploadError && <p style={{ color: "red" }}>{uploadError}</p>}
+        {uploading && <p className="status-text">Uploading image...</p>}
+        {uploadError && <p className="error-text">{uploadError}</p>}
 
         {imagePreview && (
           <div className="preview">

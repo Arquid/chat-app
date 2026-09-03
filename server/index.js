@@ -163,6 +163,22 @@ io.use((socket, next) => {
   }
 });
 
+function getRoomUsers(room) {
+  const socketIds = io.sockets.adapter.rooms.get(room);
+  if (!socketIds) return [];
+
+  const usernames = new Set();
+  for (const id of socketIds) {
+    const username = io.sockets.sockets.get(id)?.data?.username;
+    if (username) usernames.add(username);
+  }
+  return Array.from(usernames);
+}
+
+function broadcastRoomUsers(room) {
+  io.to(room).emit("roomUsers", { room, users: getRoomUsers(room) });
+}
+
 io.on('connection', (socket) => {
   const MESSAGE_RATE_LIMIT = 5;
   const MESSAGE_RATE_WINDOW_MS = 10000;
@@ -177,6 +193,7 @@ io.on('connection', (socket) => {
     room: defaultRoom,
     messages: messages.filter((m) => m.room === defaultRoom),
   });
+  broadcastRoomUsers(defaultRoom);
 
   socket.on("createRoom", (roomName) => {
     if (!isValidRoomName(roomName)) {
@@ -205,7 +222,8 @@ io.on('connection', (socket) => {
 
     socket.to(socket.data.currentRoom).emit("userStoppedTyping", { username: socket.data.username });
 
-    socket.leave(socket.data.currentRoom);
+    const previousRoom = socket.data.currentRoom;
+    socket.leave(previousRoom);
     socket.data.currentRoom = roomName;
     socket.join(roomName);
 
@@ -213,6 +231,9 @@ io.on('connection', (socket) => {
       room: roomName,
       messages: messages.filter((m) => m.room === roomName),
     });
+
+    broadcastRoomUsers(previousRoom);
+    broadcastRoomUsers(roomName);
   });
 
   socket.on("sendMessage", (message) => {
@@ -251,6 +272,7 @@ io.on('connection', (socket) => {
 
   socket.on("disconnect", () => {
     socket.to(socket.data.currentRoom).emit("userStoppedTyping", { username: socket.data.username });
+    broadcastRoomUsers(socket.data.currentRoom);
   });
 
   socket.on("typing", () => {

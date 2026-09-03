@@ -43,42 +43,49 @@ function App() {
   };
 
   if (auth) {
-    return <Chat username={auth.username} token={auth.token} onLogout={handleLogout} />;
+    return (
+      <div className="chat-page">
+        <Chat username={auth.username} token={auth.token} onLogout={handleLogout} />
+      </div>
+    );
   }
 
   return (
     <div className="App">
-      <h2>{mode === "login" ? "Login to Chat" : "Create an account"}</h2>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          maxLength={20}
-          onChange={(e) => setUsername(e.target.value)}
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        <button type="submit" disabled={submitting}>
-          {mode === "login" ? "Login" : "Register"}
+      <div className="auth-card">
+        <h2>{mode === "login" ? "Login to Chat" : "Create an account"}</h2>
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <input
+            type="text"
+            placeholder="Username"
+            value={username}
+            maxLength={20}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <button type="submit" className="primary-button" disabled={submitting}>
+            {mode === "login" ? "Login" : "Register"}
+          </button>
+        </form>
+
+        {error && <p className="error-text">{error}</p>}
+
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => {
+            setMode(mode === "login" ? "register" : "login");
+            setError("");
+          }}
+        >
+          {mode === "login" ? "Need an account? Register" : "Already have an account? Login"}
         </button>
-      </form>
-
-      {error && <p style={{ color: "red" }}>{error}</p>}
-
-      <button
-        type="button"
-        onClick={() => {
-          setMode(mode === "login" ? "register" : "login");
-          setError("");
-        }}
-      >
-        {mode === "login" ? "Need an account? Register" : "Already have an account? Login"}
-      </button>
+      </div>
     </div>
   );
 }

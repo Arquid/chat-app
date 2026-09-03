@@ -27,6 +27,7 @@ describe("Chat", () => {
     render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
     expect(mockSocket.on).toHaveBeenCalledWith("roomList", expect.any(Function));
     expect(mockSocket.on).toHaveBeenCalledWith("roomMessages", expect.any(Function));
+    expect(mockSocket.on).toHaveBeenCalledWith("roomUsers", expect.any(Function));
     expect(mockSocket.on).toHaveBeenCalledWith("roomError", expect.any(Function));
     expect(mockSocket.on).toHaveBeenCalledWith("receiveMessage", expect.any(Function));
     expect(mockSocket.on).toHaveBeenCalledWith("rateLimitExceeded", expect.any(Function));
@@ -348,5 +349,51 @@ describe("Typing indicator", () => {
     fireEvent.click(screen.getByText("Send"));
 
     expect(mockSocket.emit).toHaveBeenCalledWith("stopTyping");
+  });
+});
+
+describe("Presence", () => {
+  it("shows no one online by default", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    expect(screen.getByText("Online (0):")).toBeInTheDocument();
+  });
+
+  it("renders the users received via roomUsers", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    act(() => {
+      handlers.roomUsers({ room: "general", users: ["alice", "bob"] });
+    });
+    expect(screen.getByText("Online (2):")).toBeInTheDocument();
+    expect(screen.getByText("alice, bob")).toBeInTheDocument();
+  });
+
+  it("updates the count and names when roomUsers changes", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    act(() => {
+      handlers.roomUsers({ room: "general", users: ["alice", "bob"] });
+    });
+    act(() => {
+      handlers.roomUsers({ room: "general", users: ["alice"] });
+    });
+    expect(screen.getByText("Online (1):")).toBeInTheDocument();
+    expect(screen.queryByText(/bob/)).not.toBeInTheDocument();
+  });
+
+  it("resets the presence list when switching rooms", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    act(() => {
+      handlers.roomUsers({ room: "general", users: ["alice", "bob"] });
+    });
+    expect(screen.getByText("Online (2):")).toBeInTheDocument();
+
+    act(() => {
+      handlers.roomMessages({ room: "random", messages: [] });
+    });
+    expect(screen.getByText("Online (0):")).toBeInTheDocument();
+
+    act(() => {
+      handlers.roomUsers({ room: "random", users: ["alice"] });
+    });
+    expect(screen.getByText("Online (1):")).toBeInTheDocument();
   });
 });

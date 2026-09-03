@@ -22,6 +22,8 @@ A real-time, multi-room chat application built with **React**, **Socket.io**, an
 
 - **Real-time messaging** with multiple users via Socket.io
 - **Rooms** — join the default `general` room or create your own; each room keeps its own history and only members of a room see its messages
+- **Online presence** — see who's currently in the room with you, updated live as people join, switch rooms, or disconnect
+- **"X is typing..." indicator** — per-room, self-clearing after a pause or when the message is sent
 - **User accounts** — registration and login with hashed passwords (bcrypt) and JWT-based sessions
 - **Image uploads** (JPEG, PNG, WEBP, max 2MB) with live preview and loading indicator
 - **Emoji picker** integration (`emoji-picker-react`)
@@ -117,8 +119,8 @@ Lint, tests, and build run automatically on every push and pull request to `main
 ## Usage
 
 1. Open the app in your browser and register an account (username 3-20 characters, password 8+ characters), or log in if you already have one
-2. You land in the `general` room — pick a different one from the sidebar or create a new one (room names: 2-30 characters)
-3. Type a message and press Enter or click Send
+2. You land in the `general` room — pick a different one from the sidebar or create a new one (room names: 2-30 characters); the header shows everyone currently in the room, including you
+3. Type a message and press Enter or click Send — everyone else in the room briefly sees your username with an "is typing..." notice while you compose it
 4. Click 😀 to open the emoji picker and select emojis
 5. Click 📎 to attach an image — a preview appears before sending
 6. Click Logout to end your session
