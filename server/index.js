@@ -1,4 +1,6 @@
 import "dotenv/config";
+import fs from 'fs';
+import path from 'path';
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -184,6 +186,21 @@ io.on('connection', (socket) => {
   const MESSAGE_RATE_WINDOW_MS = 10000;
   const messageTimestamps = [];
 
+  // Shared budget for sending, editing, and deleting messages so none of
+  // them can be used to route around the others' rate limit.
+  function checkRateLimit() {
+    const now = Date.now();
+    while (messageTimestamps.length && now - messageTimestamps[0] > MESSAGE_RATE_WINDOW_MS) {
+      messageTimestamps.shift();
+    }
+    if (messageTimestamps.length >= MESSAGE_RATE_LIMIT) {
+      socket.emit("rateLimitExceeded", { message: "You're sending messages too fast" });
+      return false;
+    }
+    messageTimestamps.push(now);
+    return true;
+  }
+
   const defaultRoom = rooms.includes("general") ? "general" : rooms[0];
   socket.data.currentRoom = defaultRoom;
   socket.join(defaultRoom);
@@ -237,19 +254,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on("sendMessage", (message) => {
-    const now = Date.now();
-
-    while (messageTimestamps.length && now - messageTimestamps[0] > MESSAGE_RATE_WINDOW_MS) {
-      messageTimestamps.shift();
-    }
-
-    if (messageTimestamps.length >= MESSAGE_RATE_LIMIT) {
-      socket.emit("rateLimitExceeded", { message: "You're sending messages too fast" });
-      return;
-    }
-
-    messageTimestamps.push(now);
-
+    if (!checkRateLimit()) return;
     if (!isValidMessage(message)) return;
 
     const room = socket.data.currentRoom;
@@ -268,6 +273,41 @@ io.on('connection', (socket) => {
     saveMessages(messages);
 
     io.to(room).emit("receiveMessage", safeMessage);
+  });
+
+  socket.on("editMessage", ({ id, text } = {}) => {
+    if (!checkRateLimit()) return;
+    if (typeof id !== "string") return;
+
+    const existing = messages.find((m) => m.id === id);
+    // Ownership is checked server-side from the authenticated socket, never
+    // trusted from the client, so a user can only ever edit their own messages.
+    if (!existing || existing.username !== socket.data.username) return;
+    if (!isValidMessage({ text, image: existing.image })) return;
+
+    existing.text = text.trim().slice(0, MAX_TEXT_LENGTH);
+    existing.edited = true;
+    saveMessages(messages);
+
+    io.to(existing.room).emit("messageEdited", existing);
+  });
+
+  socket.on("deleteMessage", ({ id } = {}) => {
+    if (!checkRateLimit()) return;
+    if (typeof id !== "string") return;
+
+    const existing = messages.find((m) => m.id === id);
+    if (!existing || existing.username !== socket.data.username) return;
+
+    messages = messages.filter((m) => m.id !== id);
+    saveMessages(messages);
+
+    if (existing.image) {
+      const filePath = path.join("uploads", path.basename(existing.image));
+      fs.unlink(filePath, () => {}); // best-effort cleanup, ignore errors
+    }
+
+    io.to(existing.room).emit("messageDeleted", { id, room: existing.room });
   });
 
   socket.on("disconnect", () => {

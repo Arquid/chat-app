@@ -368,6 +368,70 @@
   color: #999;
 }
 
+.edited-tag {
+  font-size: 11px;
+  font-style: italic;
+  color: #999;
+}
+
+.message-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.message-actions button {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  color: #888;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.message-actions button:hover {
+  color: var(--chat-accent);
+}
+
+.edit-form {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.edit-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #1a1a1a;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.edit-form input:focus {
+  outline: none;
+  border-color: var(--chat-accent);
+}
+
+.edit-form button {
+  flex-shrink: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #f0f0f0;
+  color: #1a1a1a;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.edit-form button:hover {
+  background: #e5e5e5;
+}
+
 /* ---------- Typing indicator ---------- */
 
 .typing-indicator {

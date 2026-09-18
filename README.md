@@ -29,6 +29,7 @@ A real-time, multi-room chat application built with **React**, **Socket.io**, an
 - **Emoji picker** integration (`emoji-picker-react`)
 - **Rate limiting** on login/register, uploads, room creation, and outgoing messages to curb abuse
 - **Persistent history** — the last 200 messages per room survive a server restart
+- **Edit and delete your own messages** — ownership is checked server-side, so a message can only ever be changed or removed by the person who sent it; deleting an image message also removes the uploaded file
 - Server-side validation of usernames, room names, and message content — the server, not the client, decides who sent what
 - Auto-scrolling to the newest message, connection/disconnection handling, and self-dismissing error/warning banners
 
@@ -123,7 +124,8 @@ Lint, tests, and build run automatically on every push and pull request to `main
 3. Type a message and press Enter or click Send — everyone else in the room briefly sees your username with an "is typing..." notice while you compose it
 4. Click 😀 to open the emoji picker and select emojis
 5. Click 📎 to attach an image — a preview appears before sending
-6. Click Logout to end your session
+6. Your own messages show Edit/Delete links — edits show an "(edited)" tag, deletes ask for confirmation first
+7. Click Logout to end your session
 
 ## Security notes
 

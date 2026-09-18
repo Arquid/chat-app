@@ -30,6 +30,8 @@ describe("Chat", () => {
     expect(mockSocket.on).toHaveBeenCalledWith("roomUsers", expect.any(Function));
     expect(mockSocket.on).toHaveBeenCalledWith("roomError", expect.any(Function));
     expect(mockSocket.on).toHaveBeenCalledWith("receiveMessage", expect.any(Function));
+    expect(mockSocket.on).toHaveBeenCalledWith("messageEdited", expect.any(Function));
+    expect(mockSocket.on).toHaveBeenCalledWith("messageDeleted", expect.any(Function));
     expect(mockSocket.on).toHaveBeenCalledWith("rateLimitExceeded", expect.any(Function));
   });
 
@@ -395,5 +397,139 @@ describe("Presence", () => {
       handlers.roomUsers({ room: "random", users: ["alice"] });
     });
     expect(screen.getByText("Online (1):")).toBeInTheDocument();
+  });
+});
+
+describe("Message edit/delete", () => {
+  const seedMessages = () => {
+    act(() => {
+      handlers.roomMessages({
+        room: "general",
+        messages: [
+          { id: "own-1", username: "alice", text: "my message", image: null, timestamp: "2026-01-01T00:00:00.000Z" },
+          { id: "other-1", username: "bob", text: "bob's message", image: null, timestamp: "2026-01-01T00:00:00.000Z" },
+        ],
+      });
+    });
+  };
+
+  it("shows Edit/Delete only on the current user's own messages", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessages();
+
+    const ownMessage = screen.getByText("my message").closest(".message");
+    const otherMessage = screen.getByText("bob's message").closest(".message");
+
+    expect(ownMessage.querySelector(".message-actions")).not.toBeNull();
+    expect(otherMessage.querySelector(".message-actions")).toBeNull();
+  });
+
+  it("switches to an edit form pre-filled with the current text", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessages();
+
+    fireEvent.click(screen.getAllByText("Edit")[0]);
+
+    const editInput = screen.getByDisplayValue("my message");
+    expect(editInput).toBeInTheDocument();
+  });
+
+  it("emits editMessage with the new text and exits edit mode", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessages();
+
+    fireEvent.click(screen.getAllByText("Edit")[0]);
+    const editInput = screen.getByDisplayValue("my message");
+    fireEvent.change(editInput, { target: { value: "updated message" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    expect(mockSocket.emit).toHaveBeenCalledWith("editMessage", { id: "own-1", text: "updated message" });
+    expect(screen.queryByDisplayValue("updated message")).not.toBeInTheDocument();
+  });
+
+  it("saves on Enter and cancels on Escape", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessages();
+
+    fireEvent.click(screen.getAllByText("Edit")[0]);
+    let editInput = screen.getByDisplayValue("my message");
+    fireEvent.change(editInput, { target: { value: "via enter" } });
+    fireEvent.keyDown(editInput, { key: "Enter" });
+    expect(mockSocket.emit).toHaveBeenCalledWith("editMessage", { id: "own-1", text: "via enter" });
+
+    mockSocket.emit.mockClear();
+    fireEvent.click(screen.getAllByText("Edit")[0]);
+    editInput = screen.getByDisplayValue("my message");
+    fireEvent.keyDown(editInput, { key: "Escape" });
+    expect(screen.queryByDisplayValue("my message")).not.toBeInTheDocument();
+    expect(mockSocket.emit).not.toHaveBeenCalledWith("editMessage", expect.anything());
+  });
+
+  it("cancel button exits edit mode without emitting", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessages();
+
+    fireEvent.click(screen.getAllByText("Edit")[0]);
+    fireEvent.click(screen.getByText("Cancel"));
+
+    expect(screen.queryByDisplayValue("my message")).not.toBeInTheDocument();
+    expect(screen.getByText("my message")).toBeInTheDocument();
+    expect(mockSocket.emit).not.toHaveBeenCalledWith("editMessage", expect.anything());
+  });
+
+  it("applies the edited text and shows an (edited) tag when messageEdited arrives", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessages();
+
+    act(() => {
+      handlers.messageEdited({
+        id: "own-1",
+        room: "general",
+        username: "alice",
+        text: "edited text",
+        image: null,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        edited: true,
+      });
+    });
+
+    expect(screen.getByText("edited text")).toBeInTheDocument();
+    expect(screen.queryByText("my message")).not.toBeInTheDocument();
+    expect(screen.getByText("(edited)")).toBeInTheDocument();
+  });
+
+  it("asks for confirmation and emits deleteMessage when confirmed", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessages();
+
+    fireEvent.click(screen.getAllByText("Delete")[0]);
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(mockSocket.emit).toHaveBeenCalledWith("deleteMessage", { id: "own-1" });
+    confirmSpy.mockRestore();
+  });
+
+  it("does not emit deleteMessage when confirmation is declined", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessages();
+
+    fireEvent.click(screen.getAllByText("Delete")[0]);
+
+    expect(mockSocket.emit).not.toHaveBeenCalledWith("deleteMessage", expect.anything());
+    confirmSpy.mockRestore();
+  });
+
+  it("removes the message from the list when messageDeleted arrives", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessages();
+
+    act(() => {
+      handlers.messageDeleted({ id: "own-1", room: "general" });
+    });
+
+    expect(screen.queryByText("my message")).not.toBeInTheDocument();
+    expect(screen.getByText("bob's message")).toBeInTheDocument();
   });
 });

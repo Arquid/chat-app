@@ -18,6 +18,8 @@ function Chat({ username, token, onLogout }) {
   const [roomError, setRoomError] = useState("");
   const [typingUsers, setTypingUsers] = useState([]);
   const [roomUsers, setRoomUsers] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState("");
 
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
@@ -64,6 +66,12 @@ function Chat({ username, token, onLogout }) {
       setTypingUsers((prev) => prev.filter((u) => u !== typingUsername));
     });
     socketRef.current.on("receiveMessage", (message) => setMessages((prev) => [...prev, message]));
+    socketRef.current.on("messageEdited", (updated) => {
+      setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+    });
+    socketRef.current.on("messageDeleted", ({ id }) => {
+      setMessages((prev) => prev.filter((m) => m.id !== id));
+    });
     socketRef.current.on("rateLimitExceeded", (data) => {
       setUploadError(data.message);
     });
@@ -216,6 +224,28 @@ function Chat({ username, token, onLogout }) {
     }, TYPING_TIMEOUT_MS);
   };
 
+  const startEdit = (msg) => {
+    setEditingId(msg.id);
+    setEditText(msg.text);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditText("");
+  };
+
+  const saveEdit = (id) => {
+    if (!editText.trim()) return;
+    socketRef.current.emit("editMessage", { id, text: editText });
+    setEditingId(null);
+    setEditText("");
+  };
+
+  const deleteMessage = (id) => {
+    if (!window.confirm("Delete this message?")) return;
+    socketRef.current.emit("deleteMessage", { id });
+  };
+
   return (
     <div className="chat">
       <div className="rooms-sidebar">
@@ -269,10 +299,39 @@ function Chat({ username, token, onLogout }) {
                   {msg.timestamp && (
                     <span className="timestamp">{new Date(msg.timestamp).toLocaleTimeString()}</span>
                   )}
+                  {msg.edited && <span className="edited-tag">(edited)</span>}
                 </div>
-                {msg.text && <div className="message-text">{msg.text}</div>}
-                {msg.image && (
-                  <img src={`${SERVER_URL}${msg.image}`} alt="Uploaded" className="sent-image" />
+
+                {editingId === msg.id ? (
+                  <div className="edit-form">
+                    <input
+                      type="text"
+                      value={editText}
+                      maxLength={MAX_TEXT_LENGTH}
+                      onChange={(e) => setEditText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveEdit(msg.id);
+                        if (e.key === "Escape") cancelEdit();
+                      }}
+                      autoFocus
+                    />
+                    <button onClick={() => saveEdit(msg.id)}>Save</button>
+                    <button onClick={cancelEdit}>Cancel</button>
+                  </div>
+                ) : (
+                  <>
+                    {msg.text && <div className="message-text">{msg.text}</div>}
+                    {msg.image && (
+                      <img src={`${SERVER_URL}${msg.image}`} alt="Uploaded" className="sent-image" />
+                    )}
+                  </>
+                )}
+
+                {msg.username === username && editingId !== msg.id && (
+                  <div className="message-actions">
+                    <button onClick={() => startEdit(msg)}>Edit</button>
+                    <button onClick={() => deleteMessage(msg.id)}>Delete</button>
+                  </div>
                 )}
               </div>
             </div>
