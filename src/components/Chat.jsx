@@ -20,11 +20,13 @@ function Chat({ username, token, onLogout }) {
   const [roomUsers, setRoomUsers] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState("");
+  const [reactionPickerId, setReactionPickerId] = useState(null);
 
   const fileInputRef = useRef(null);
   const chatEndRef = useRef(null);
   const socketRef = useRef(null);
   const emojiPickerRef = useRef(null);
+  const reactionPickerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
   const MAX_FILE_SIZE = 2 * 1024 * 1024;
@@ -72,6 +74,9 @@ function Chat({ username, token, onLogout }) {
     socketRef.current.on("messageDeleted", ({ id }) => {
       setMessages((prev) => prev.filter((m) => m.id !== id));
     });
+    socketRef.current.on("reactionUpdated", ({ id, reactions }) => {
+      setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, reactions } : m)));
+    });
     socketRef.current.on("rateLimitExceeded", (data) => {
       setUploadError(data.message);
     });
@@ -114,8 +119,29 @@ function Chat({ username, token, onLogout }) {
     };
   }, [showEmojiPicker]);
 
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (reactionPickerRef.current && !reactionPickerRef.current.contains(event.target)) {
+        setReactionPickerId(null);
+      }
+    };
+
+    if (reactionPickerId) {
+      document.addEventListener("click", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("click", handleClickOutside);
+    };
+  }, [reactionPickerId]);
+
   const onEmojiClick = (emoji) => {
     setMessage((prev) => prev + emoji.emoji);
+  };
+
+  const toggleReaction = (id, emoji) => {
+    socketRef.current.emit("toggleReaction", { id, emoji });
+    setReactionPickerId(null);
   };
 
   const handleFileChange = (e) => {
@@ -326,6 +352,33 @@ function Chat({ username, token, onLogout }) {
                     )}
                   </>
                 )}
+
+                <div className="message-reactions">
+                  {Object.entries(msg.reactions || {}).map(([emoji, users]) => (
+                    <button
+                      key={emoji}
+                      className={`reaction-pill ${users.includes(username) ? "reaction-active" : ""}`}
+                      title={users.join(", ")}
+                      onClick={() => toggleReaction(msg.id, emoji)}
+                    >
+                      {emoji} {users.length}
+                    </button>
+                  ))}
+                  <button
+                    className="add-reaction-button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setReactionPickerId((prev) => (prev === msg.id ? null : msg.id));
+                    }}
+                  >
+                    ☺+
+                  </button>
+                  {reactionPickerId === msg.id && (
+                    <div ref={reactionPickerRef} className="reaction-picker">
+                      <Picker onEmojiClick={(emoji) => toggleReaction(msg.id, emoji.emoji)} />
+                    </div>
+                  )}
+                </div>
 
                 {msg.username === username && editingId !== msg.id && (
                   <div className="message-actions">

@@ -26,7 +26,8 @@ A real-time, multi-room chat application built with **React**, **Socket.io**, an
 - **"X is typing..." indicator** — per-room, self-clearing after a pause or when the message is sent
 - **User accounts** — registration and login with hashed passwords (bcrypt) and JWT-based sessions
 - **Image uploads** (JPEG, PNG, WEBP, max 2MB) with live preview and loading indicator
-- **Emoji picker** integration (`emoji-picker-react`)
+- **Emoji picker** integration (`emoji-picker-react`) for composing messages and reacting to them
+- **Emoji reactions** — react to any message with any emoji; click an existing reaction to add or remove your own, counts and your own highlighted reactions update live for everyone in the room
 - **Rate limiting** on login/register, uploads, room creation, and outgoing messages to curb abuse
 - **Persistent history** — the last 200 messages per room survive a server restart
 - **Edit and delete your own messages** — ownership is checked server-side, so a message can only ever be changed or removed by the person who sent it; deleting an image message also removes the uploaded file
@@ -124,8 +125,9 @@ Lint, tests, and build run automatically on every push and pull request to `main
 3. Type a message and press Enter or click Send — everyone else in the room briefly sees your username with an "is typing..." notice while you compose it
 4. Click 😀 to open the emoji picker and select emojis
 5. Click 📎 to attach an image — a preview appears before sending
-6. Your own messages show Edit/Delete links — edits show an "(edited)" tag, deletes ask for confirmation first
-7. Click Logout to end your session
+6. Click ☺+ under any message to react with an emoji, or click an existing reaction to toggle your own
+7. Your own messages show Edit/Delete links — edits show an "(edited)" tag, deletes ask for confirmation first
+8. Click Logout to end your session
 
 ## Security notes
 

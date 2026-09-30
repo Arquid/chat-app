@@ -334,6 +334,7 @@
 }
 
 .message-bubble {
+  position: relative;
   background: #f1f1f4;
   border-radius: 12px;
   padding: 8px 12px;
@@ -372,6 +373,62 @@
   font-size: 11px;
   font-style: italic;
   color: #999;
+}
+
+.message-reactions {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.reaction-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+  background: #fff;
+  color: #333;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.reaction-pill:hover {
+  border-color: var(--chat-accent);
+}
+
+.reaction-pill.reaction-active {
+  border-color: var(--chat-accent);
+  background: var(--chat-accent-bg);
+  color: var(--chat-accent);
+  font-weight: 600;
+}
+
+.add-reaction-button {
+  padding: 2px 6px;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+  background: #fff;
+  color: #888;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.add-reaction-button:hover {
+  border-color: var(--chat-accent);
+  color: var(--chat-accent);
+}
+
+.reaction-picker {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 1000;
 }
 
 .message-actions {

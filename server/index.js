@@ -310,6 +310,34 @@ io.on('connection', (socket) => {
     io.to(existing.room).emit("messageDeleted", { id, room: existing.room });
   });
 
+  socket.on("toggleReaction", ({ id, emoji } = {}) => {
+    if (!checkRateLimit()) return;
+    if (typeof id !== "string") return;
+    if (typeof emoji !== "string" || emoji.length === 0 || emoji.length > 8) return;
+
+    const existing = messages.find((m) => m.id === id);
+    if (!existing) return;
+
+    existing.reactions = existing.reactions || {};
+    const users = existing.reactions[emoji] || [];
+    const alreadyReacted = users.includes(socket.data.username);
+
+    if (alreadyReacted) {
+      const remaining = users.filter((u) => u !== socket.data.username);
+      if (remaining.length > 0) {
+        existing.reactions[emoji] = remaining;
+      } else {
+        delete existing.reactions[emoji];
+      }
+    } else {
+      existing.reactions[emoji] = [...users, socket.data.username];
+    }
+
+    saveMessages(messages);
+
+    io.to(existing.room).emit("reactionUpdated", { id: existing.id, reactions: existing.reactions });
+  });
+
   socket.on("disconnect", () => {
     socket.to(socket.data.currentRoom).emit("userStoppedTyping", { username: socket.data.username });
     broadcastRoomUsers(socket.data.currentRoom);

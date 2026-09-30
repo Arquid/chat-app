@@ -15,6 +15,14 @@ vi.mock("socket.io-client", () => ({
   default: vi.fn(() => mockSocket),
 }));
 
+// The real emoji-picker-react is a large third-party component; stub it with
+// a single button so tests can trigger onEmojiClick deterministically.
+vi.mock("emoji-picker-react", () => ({
+  default: ({ onEmojiClick }) => (
+    <button onClick={() => onEmojiClick({ emoji: "🎉" })}>mock-emoji-picker</button>
+  ),
+}));
+
 beforeEach(() => {
   mockSocket.on.mockClear();
   mockSocket.emit.mockClear();
@@ -531,5 +539,79 @@ describe("Message edit/delete", () => {
 
     expect(screen.queryByText("my message")).not.toBeInTheDocument();
     expect(screen.getByText("bob's message")).toBeInTheDocument();
+  });
+});
+
+describe("Message reactions", () => {
+  const seedMessage = (reactions) => {
+    act(() => {
+      handlers.roomMessages({
+        room: "general",
+        messages: [
+          {
+            id: "msg-1",
+            username: "bob",
+            text: "react to this",
+            image: null,
+            timestamp: "2026-01-01T00:00:00.000Z",
+            reactions,
+          },
+        ],
+      });
+    });
+  };
+
+  it("renders no reaction pills when there are no reactions", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessage(undefined);
+
+    expect(screen.queryByText(/👍/)).not.toBeInTheDocument();
+    expect(screen.getByText("☺+")).toBeInTheDocument();
+  });
+
+  it("renders existing reactions with counts", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessage({ "👍": ["bob", "carol"], "🎉": ["alice"] });
+
+    expect(screen.getByText("👍 2")).toBeInTheDocument();
+    expect(screen.getByText("🎉 1")).toBeInTheDocument();
+  });
+
+  it("marks a reaction as active when the current user is in it", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessage({ "👍": ["alice"], "🎉": ["bob"] });
+
+    expect(screen.getByText("👍 1")).toHaveClass("reaction-active");
+    expect(screen.getByText("🎉 1")).not.toHaveClass("reaction-active");
+  });
+
+  it("emits toggleReaction when clicking an existing pill", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessage({ "👍": ["bob"] });
+
+    fireEvent.click(screen.getByText("👍 1"));
+
+    expect(mockSocket.emit).toHaveBeenCalledWith("toggleReaction", { id: "msg-1", emoji: "👍" });
+  });
+
+  it("opens the emoji picker and emits toggleReaction on selection", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessage(undefined);
+
+    fireEvent.click(screen.getByText("☺+"));
+    fireEvent.click(screen.getByText("mock-emoji-picker"));
+
+    expect(mockSocket.emit).toHaveBeenCalledWith("toggleReaction", { id: "msg-1", emoji: "🎉" });
+  });
+
+  it("updates reactions in place when reactionUpdated arrives", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    seedMessage(undefined);
+
+    act(() => {
+      handlers.reactionUpdated({ id: "msg-1", reactions: { "❤️": ["alice"] } });
+    });
+
+    expect(screen.getByText("❤️ 1")).toBeInTheDocument();
   });
 });
