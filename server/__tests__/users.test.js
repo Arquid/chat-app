@@ -47,6 +47,46 @@ describe("registerUser", () => {
     expect(stored.carol.passwordHash).not.toBe("supersecret1");
     expect(stored.carol.passwordHash).toMatch(/^\$2[aby]\$/); // bcrypt hash format
   });
+
+  // Regression: registerUser used to read users.json, await the (slow) bcrypt
+  // hash, then write its stale copy back, so concurrent signups overwrote each
+  // other and all but one account was lost even though every request got a token.
+  it("keeps every account when many users register at the same time", async () => {
+    const names = ["racer1", "racer2", "racer3", "racer4", "racer5", "racer6"];
+
+    const results = await Promise.allSettled(names.map((name) => users.registerUser(name, "password123")));
+
+    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
+    const stored = JSON.parse(fs.readFileSync(usersFile(), "utf-8"));
+    expect(Object.keys(stored).sort()).toEqual(names);
+
+    for (const name of names) {
+      await expect(users.loginUser(name, "password123")).resolves.toEqual(expect.any(String));
+    }
+  });
+
+  it("lets only one of several simultaneous registrations of the same name win", async () => {
+    const results = await Promise.allSettled(
+      [1, 2, 3, 4].map(() => users.registerUser("samename", "password123"))
+    );
+
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((r) => r.status === "rejected").every((r) => r.reason.message === "Username already taken")).toBe(true);
+    expect(Object.keys(JSON.parse(fs.readFileSync(usersFile(), "utf-8")))).toEqual(["samename"]);
+  });
+
+  it("does not leave temporary files behind after saving", async () => {
+    await users.registerUser("tidy1", "password123");
+    const leftovers = fs.readdirSync(path.join(tempRoot, "server")).filter((f) => f.endsWith(".tmp"));
+    expect(leftovers).toEqual([]);
+  });
+
+  it("treats Object.prototype member names as ordinary, registrable usernames", async () => {
+    // "constructor" used to resolve to an inherited function and be reported as taken.
+    const token = await users.registerUser("constructor", "password123");
+    expect(users.verifyToken(token).username).toBe("constructor");
+    await expect(users.loginUser("constructor", "password123")).resolves.toEqual(expect.any(String));
+  });
 });
 
 describe("loginUser", () => {
@@ -65,6 +105,12 @@ describe("loginUser", () => {
     // Same error message for both cases so login can't be used to enumerate
     // which usernames are registered.
     await expect(users.loginUser("ghost", "whatever123")).rejects.toThrow("Invalid username or password");
+  });
+
+  it("gives the generic error for names that exist on Object.prototype but were never registered", async () => {
+    for (const name of ["toString", "hasOwnProperty", "__proto__", "valueOf"]) {
+      await expect(users.loginUser(name, "password123")).rejects.toThrow("Invalid username or password");
+    }
   });
 
   it("is case-insensitive on username", async () => {

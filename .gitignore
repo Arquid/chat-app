@@ -25,6 +25,7 @@ uploads/*
 server/users.json
 server/messages.json
 server/rooms.json
+server/uploads.json
 
 # Editor directories and files
 .vscode/*

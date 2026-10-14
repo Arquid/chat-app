@@ -85,6 +85,23 @@ describe("Chat", () => {
     expect(img.src).toBe("http://localhost:5000/uploads/photo.png");
   });
 
+  it("never renders an image whose path could point at another host", () => {
+    render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
+    act(() => {
+      handlers.roomMessages({
+        room: "general",
+        messages: [
+          { id: "a", username: "eve", text: "at-sign", image: "@127.0.0.1:9999/t.png", timestamp: "2026-01-01T00:00:00.000Z" },
+          { id: "b", username: "eve", text: "suffix", image: ".attacker.test/p.png", timestamp: "2026-01-01T00:00:00.000Z" },
+          { id: "c", username: "eve", text: "absolute", image: "http://evil.example/p.png", timestamp: "2026-01-01T00:00:00.000Z" },
+          { id: "d", username: "eve", text: "traversal", image: "/uploads/../x.png", timestamp: "2026-01-01T00:00:00.000Z" },
+        ],
+      });
+    });
+    expect(screen.getByText("at-sign")).toBeInTheDocument();
+    expect(screen.queryByAltText("Uploaded")).not.toBeInTheDocument();
+  });
+
   it("does not emit sendMessage when the input is empty and no image is attached", () => {
     render(<Chat username="alice" token="tok-123" onLogout={vi.fn()} />);
     fireEvent.click(screen.getByText("Send"));

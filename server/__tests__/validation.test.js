@@ -1,5 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { isValidUsername, isValidPassword, isValidMessage, isValidRoomName, MAX_TEXT_LENGTH } from "../validation.js";
+import { isValidUsername, isValidPassword, isValidMessage, isValidRoomName, parseImagePath, MAX_TEXT_LENGTH } from "../validation.js";
+
+const VALID_IMAGE = "/uploads/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d.png";
+
+describe("parseImagePath", () => {
+  it("returns the stored file name for a valid upload path", () => {
+    expect(parseImagePath(VALID_IMAGE)).toBe("0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d.png");
+  });
+
+  it("returns null for anything else, including non-strings", () => {
+    expect(parseImagePath("/uploads/x.png")).toBeNull();
+    expect(parseImagePath("@host/x.png")).toBeNull();
+    expect(parseImagePath(null)).toBeNull();
+    expect(parseImagePath(undefined)).toBeNull();
+    expect(parseImagePath(42)).toBeNull();
+    expect(parseImagePath({})).toBeNull();
+  });
+});
 
 describe("isValidUsername", () => {
   it("accepts 3-20 alphanumeric/underscore/hyphen characters", () => {
@@ -50,7 +67,31 @@ describe("isValidMessage", () => {
   });
 
   it("accepts an image-only message with empty text", () => {
-    expect(isValidMessage({ text: "", image: "/uploads/x.png" })).toBe(true);
+    expect(isValidMessage({ text: "", image: VALID_IMAGE })).toBe(true);
+  });
+
+  it("rejects image values that are not one of our own upload paths", () => {
+    const bad = [
+      "/uploads/x.png", // not a uuid file name
+      "@127.0.0.1:9999/track.png", // would change the host once glued onto SERVER_URL
+      ".attacker.test/pixel.png",
+      "http://evil.example/pixel.png",
+      "/uploads/../server/users.json",
+      `${VALID_IMAGE}/../x`,
+      `${VALID_IMAGE}?x=1`,
+      "/uploads/11111111-2222-3333-4444-555555555555.svg",
+      "/uploads/11111111-2222-3333-4444-555555555555.PNG",
+      "",
+    ];
+    for (const image of bad) {
+      expect(isValidMessage({ text: "hi", image })).toBe(false);
+    }
+  });
+
+  it("accepts every extension the upload endpoint can produce", () => {
+    for (const ext of ["png", "jpg", "webp"]) {
+      expect(isValidMessage({ text: "hi", image: `/uploads/11111111-2222-3333-4444-555555555555.${ext}` })).toBe(true);
+    }
   });
 
   it("rejects a message with neither text nor image", () => {

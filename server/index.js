@@ -12,7 +12,10 @@ import rateLimit from "express-rate-limit";
 import { registerUser, loginUser, verifyToken } from "./users.js";
 import { loadMessages, saveMessages } from "./messages.js";
 import { loadRooms, saveRooms } from "./rooms.js";
-import { isValidUsername, isValidPassword, isValidMessage, isValidRoomName, MAX_TEXT_LENGTH } from "./validation.js";
+import { loadUploads, saveUploads } from "./uploads.js";
+import { toggleReaction } from "./reactions.js";
+import { safeHandler } from "./safeHandler.js";
+import { isValidUsername, isValidPassword, isValidMessage, isValidRoomName, parseImagePath, MAX_TEXT_LENGTH } from "./validation.js";
 
 const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
@@ -26,7 +29,10 @@ app.use(cors({ origin: CLIENT_ORIGIN }));
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
-let messages = loadMessages();
+// Messages saved before image references were validated may hold arbitrary
+// strings in `image`; drop anything that is not one of our own upload paths.
+let messages = loadMessages().map((m) => (m.image && !parseImagePath(m.image) ? { ...m, image: null } : m));
+let uploads = loadUploads();
 
 const MIME_TO_EXT = {
   "image/jpeg": ".jpg",
@@ -69,6 +75,30 @@ const upload = multer({
     }
   },
 });
+
+// A message may only reference an image its own sender uploaded, and each
+// upload can be attached to one message only. Marks the upload as used.
+function claimUpload(imagePath, username) {
+  const fileName = parseImagePath(imagePath);
+  const entry = fileName && Object.hasOwn(uploads, fileName) ? uploads[fileName] : null;
+  if (!entry || entry.owner !== username || entry.used) return false;
+
+  entry.used = true;
+  saveUploads(uploads);
+  return true;
+}
+
+// Deletes the file behind a removed message's image, unless some other
+// message still shows it. Only paths of our own upload format are touched.
+function releaseImage(imagePath) {
+  const fileName = parseImagePath(imagePath);
+  if (!fileName) return;
+  if (messages.some((m) => m.image === imagePath)) return;
+
+  delete uploads[fileName];
+  saveUploads(uploads);
+  fs.unlink(path.join("uploads", fileName), () => {}); // best-effort cleanup, ignore errors
+}
 
 function trimRoomHistory(room) {
   const roomMessages = messages.filter((m) => m.room === room);
@@ -141,6 +171,9 @@ app.post("/upload", uploadLimiter, authenticate, (req, res) => {
       return res.status(400).json({ error: "No image provided" });
     }
 
+    uploads[req.file.filename] = { owner: req.user.username, createdAt: new Date().toISOString(), used: false };
+    saveUploads(uploads);
+
     res.json({ imageUrl: `/uploads/${req.file.filename}` });
   });
 });
@@ -201,6 +234,13 @@ io.on('connection', (socket) => {
     return true;
   }
 
+  // Every client-triggered event goes through safeHandler, so a malformed
+  // payload is ignored instead of throwing and crashing the server. Handlers
+  // that take an object payload ignore null/primitive payloads automatically;
+  // handlers whose payload is a string or nothing opt out.
+  const on = (event, handler, options) => socket.on(event, safeHandler(handler, options));
+  const ANY_PAYLOAD = { expectObject: false };
+
   const defaultRoom = rooms.includes("general") ? "general" : rooms[0];
   socket.data.currentRoom = defaultRoom;
   socket.join(defaultRoom);
@@ -212,7 +252,7 @@ io.on('connection', (socket) => {
   });
   broadcastRoomUsers(defaultRoom);
 
-  socket.on("createRoom", (roomName) => {
+  on("createRoom", (roomName) => {
     if (!isValidRoomName(roomName)) {
       socket.emit("roomError", { message: "Room names must be 2-30 characters (letters, numbers, _ or -)" });
       return;
@@ -229,9 +269,9 @@ io.on('connection', (socket) => {
     rooms.push(roomName);
     saveRooms(rooms);
     io.emit("roomList", rooms);
-  });
+  }, ANY_PAYLOAD);
 
-  socket.on("joinRoom", (roomName) => {
+  on("joinRoom", (roomName) => {
     if (!rooms.includes(roomName)) {
       socket.emit("roomError", { message: "No such room" });
       return;
@@ -251,11 +291,12 @@ io.on('connection', (socket) => {
 
     broadcastRoomUsers(previousRoom);
     broadcastRoomUsers(roomName);
-  });
+  }, ANY_PAYLOAD);
 
-  socket.on("sendMessage", (message) => {
+  on("sendMessage", (message) => {
     if (!checkRateLimit()) return;
     if (!isValidMessage(message)) return;
+    if (message.image && !claimUpload(message.image, socket.data.username)) return;
 
     const room = socket.data.currentRoom;
 
@@ -273,9 +314,9 @@ io.on('connection', (socket) => {
     saveMessages(messages);
 
     io.to(room).emit("receiveMessage", safeMessage);
-  });
+  }, ANY_PAYLOAD);
 
-  socket.on("editMessage", ({ id, text } = {}) => {
+  on("editMessage", ({ id, text }) => {
     if (!checkRateLimit()) return;
     if (typeof id !== "string") return;
 
@@ -292,7 +333,7 @@ io.on('connection', (socket) => {
     io.to(existing.room).emit("messageEdited", existing);
   });
 
-  socket.on("deleteMessage", ({ id } = {}) => {
+  on("deleteMessage", ({ id }) => {
     if (!checkRateLimit()) return;
     if (typeof id !== "string") return;
 
@@ -302,15 +343,12 @@ io.on('connection', (socket) => {
     messages = messages.filter((m) => m.id !== id);
     saveMessages(messages);
 
-    if (existing.image) {
-      const filePath = path.join("uploads", path.basename(existing.image));
-      fs.unlink(filePath, () => {}); // best-effort cleanup, ignore errors
-    }
+    if (existing.image) releaseImage(existing.image);
 
     io.to(existing.room).emit("messageDeleted", { id, room: existing.room });
   });
 
-  socket.on("toggleReaction", ({ id, emoji } = {}) => {
+  on("toggleReaction", ({ id, emoji }) => {
     if (!checkRateLimit()) return;
     if (typeof id !== "string") return;
     if (typeof emoji !== "string" || emoji.length === 0 || emoji.length > 8) return;
@@ -318,38 +356,24 @@ io.on('connection', (socket) => {
     const existing = messages.find((m) => m.id === id);
     if (!existing) return;
 
-    existing.reactions = existing.reactions || {};
-    const users = existing.reactions[emoji] || [];
-    const alreadyReacted = users.includes(socket.data.username);
-
-    if (alreadyReacted) {
-      const remaining = users.filter((u) => u !== socket.data.username);
-      if (remaining.length > 0) {
-        existing.reactions[emoji] = remaining;
-      } else {
-        delete existing.reactions[emoji];
-      }
-    } else {
-      existing.reactions[emoji] = [...users, socket.data.username];
-    }
-
+    existing.reactions = toggleReaction(existing.reactions, emoji, socket.data.username);
     saveMessages(messages);
 
     io.to(existing.room).emit("reactionUpdated", { id: existing.id, reactions: existing.reactions });
   });
 
-  socket.on("disconnect", () => {
+  on("disconnect", () => {
     socket.to(socket.data.currentRoom).emit("userStoppedTyping", { username: socket.data.username });
     broadcastRoomUsers(socket.data.currentRoom);
-  });
+  }, ANY_PAYLOAD);
 
-  socket.on("typing", () => {
+  on("typing", () => {
     socket.to(socket.data.currentRoom).emit("userTyping", { username: socket.data.username });
-  });
+  }, ANY_PAYLOAD);
 
-  socket.on("stopTyping", () => {
+  on("stopTyping", () => {
     socket.to(socket.data.currentRoom).emit("userStoppedTyping", { username: socket.data.username });
-  });
+  }, ANY_PAYLOAD);
 });
 
 server.listen(PORT, () => {

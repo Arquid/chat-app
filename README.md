@@ -65,8 +65,12 @@ server/
   rooms.json         Room store (created at runtime, not committed)
   messages.js       Chat history persistence
   messages.json      Chat history store (created at runtime, not committed)
-  validation.js     Shared input validation (username, password, room, message)
-  __tests__/        Server-side tests
+  uploads.js        Upload registry (who uploaded which image)
+  uploads.json       Upload registry store (created at runtime, not committed)
+  reactions.js      Reaction toggling that is safe for client-supplied keys
+  safeHandler.js    Wrapper that keeps a malformed socket message from crashing the server
+  validation.js     Shared input validation (username, password, room, message, image path)
+  __tests__/        Server-side unit and integration tests (the integration tests start the real server)
 
 uploads/             Uploaded images (not committed)
 ```
@@ -114,9 +118,9 @@ npm test           # run once
 npm run test:watch # watch mode
 ```
 
-Covers server-side auth/validation/persistence logic (`server/__tests__/`) and client-side login/register/chat/room behavior (`src/__tests__/`, `src/components/__tests__/`), using [Vitest](https://vitest.dev/) and [React Testing Library](https://testing-library.com/react).
+Covers server-side auth/validation/persistence logic (`server/__tests__/`) and client-side login/register/chat/room behavior (`src/__tests__/`, `src/components/__tests__/`), using [Vitest](https://vitest.dev/) and [React Testing Library](https://testing-library.com/react). `server/__tests__/hardening.integration.test.js` starts the real server as a child process and checks that malformed client messages cannot crash it, that uploads cannot be claimed by other users, and that concurrent registrations are all saved.
 
-Lint, tests, and build run automatically on every push and pull request to `main` via GitHub Actions (see `.github/workflows/ci.yml`, tested against Node 20.x and 22.x).
+Lint, an audit of the production dependencies (`npm audit --omit=dev --audit-level=high`), tests, and build run automatically on every push and pull request to `main` via GitHub Actions (see `.github/workflows/ci.yml`, tested against Node 20.x and 22.x). Dependabot opens weekly update PRs.
 
 ## Usage
 
@@ -134,6 +138,9 @@ Lint, tests, and build run automatically on every push and pull request to `main
 - Passwords are hashed with bcrypt; plaintext passwords are never stored
 - Message identity (`username`) is assigned server-side from the JWT, not trusted from the client
 - Uploaded files are renamed to a random ID + validated extension — the original filename is never used
+- A message can only attach an image its sender uploaded themselves, and each upload can be attached once; deleting a message removes only its own image file
+- Socket event handlers ignore malformed payloads (null, wrong types, keys such as `toString`) instead of throwing, so one bad client message cannot take the server down for everyone
+- User registration saves accounts atomically, so simultaneous signups cannot overwrite each other
 - Login/register are rate-limited (10 requests / 15 min / IP) to slow down brute-force attempts
 - Outgoing chat messages are rate-limited per connection (5 messages / 10s)
 

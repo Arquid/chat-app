@@ -4,6 +4,11 @@ import Picker from "emoji-picker-react";
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:5000";
 
+// Image paths are glued onto SERVER_URL, so only a plain "/uploads/<file>"
+// path may be used. Anything else (for example "@host/x" or ".host/x") could
+// change which host the browser contacts.
+const SAFE_IMAGE_PATH = /^\/uploads\/[\w.-]+$/;
+
 function Chat({ username, token, onLogout }) {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
@@ -347,7 +352,7 @@ function Chat({ username, token, onLogout }) {
                 ) : (
                   <>
                     {msg.text && <div className="message-text">{msg.text}</div>}
-                    {msg.image && (
+                    {msg.image && SAFE_IMAGE_PATH.test(msg.image) && (
                       <img src={`${SERVER_URL}${msg.image}`} alt="Uploaded" className="sent-image" />
                     )}
                   </>
