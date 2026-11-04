@@ -6,6 +6,12 @@ import jwt from "jsonwebtoken";
 const USERS_FILE = path.join(process.cwd(), "server", "users.json");
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = "7d";
+const BCRYPT_ROUNDS = 10;
+
+// Compared against when the username does not exist, so a failed login costs
+// one bcrypt comparison whether or not the account exists. It must use the same
+// cost as real hashes, otherwise the timing difference just moves.
+const DUMMY_HASH = bcrypt.hashSync("dummy-password-that-is-never-used", BCRYPT_ROUNDS);
 
 if (!JWT_SECRET) {
   throw new Error("JWT_SECRET environment variable is required");
@@ -45,7 +51,7 @@ export async function registerUser(username, password) {
   // Do the slow, asynchronous hashing first. Everything after this line is
   // synchronous, so concurrent registrations cannot interleave between
   // reading users.json and writing it back (which used to drop accounts).
-  const passwordHash = await bcrypt.hash(password, 10);
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
   const users = loadUsers();
   if (findUser(users, key)) {
@@ -62,9 +68,18 @@ export async function loginUser(username, password) {
   const users = loadUsers();
   const user = findUser(users, username.toLowerCase());
 
-  if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-    throw new Error("Invalid username or password")
+  // An entry without a usable hash counts as "no account". Otherwise the
+  // placeholder hash below (whose password is public in this source file)
+  // would work as a login for any damaged or hand-edited entry.
+  const storedHash = typeof user?.passwordHash === "string" ? user.passwordHash : null;
+
+  // Always run exactly one comparison, so the response time does not reveal
+  // whether the username exists.
+  const passwordMatches = await bcrypt.compare(password, storedHash ?? DUMMY_HASH);
+
+  if (!storedHash || !passwordMatches) {
+    throw new Error("Invalid username or password");
   }
 
-  return generateToken(user.username)
+  return generateToken(user.username);
 }

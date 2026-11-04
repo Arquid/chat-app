@@ -363,6 +363,47 @@ describe("limits belong to the account, not the connection", () => {
   });
 });
 
+describe("login response time", () => {
+  let server;
+
+  beforeAll(async () => {
+    server = await startServer();
+    await register(server, "timeduser");
+  });
+
+  afterAll(async () => {
+    await server.stop();
+  });
+
+  it("does not reveal whether a username exists", async () => {
+    const attempt = async (username) => {
+      const start = performance.now();
+      const response = await fetch(server.url + "/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password: "wrongpass1" }),
+      });
+      const elapsed = performance.now() - start;
+      return { status: response.status, body: await response.text(), elapsed };
+    };
+
+    // 1 registration + 8 attempts stays inside the 10-request auth rate limit.
+    const known = [];
+    const unknown = [];
+    for (let i = 0; i < 4; i++) {
+      known.push(await attempt("timeduser"));
+      unknown.push(await attempt(`nosuchuser${i}`));
+    }
+
+    for (const result of [...known, ...unknown]) {
+      expect(result.status).toBe(401);
+      expect(result.body).toBe(known[0].body); // identical response either way
+    }
+    const mean = (rows) => rows.reduce((sum, r) => sum + r.elapsed, 0) / rows.length;
+    expect(mean(known) / mean(unknown)).toBeLessThan(2.5);
+  });
+});
+
 describe("room quota per user", () => {
   let server;
   const clients = [];

@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
 // users.js resolves its storage path from process.cwd() at import time, so
@@ -117,6 +118,109 @@ describe("loginUser", () => {
     await users.registerUser("Frank", "correctpassword");
     const token = await users.loginUser("frank", "correctpassword");
     expect(users.verifyToken(token).username).toBe("Frank");
+  });
+});
+
+// A failed login must cost the same work whether or not the username exists.
+// Before, an unknown username skipped bcrypt entirely and answered ~28x faster,
+// which let anyone discover which usernames are registered just by timing.
+describe("login does not reveal whether a username exists", () => {
+  // The password the placeholder hash was made from (see DUMMY_HASH in users.js).
+  const PLACEHOLDER_PASSWORD = "dummy-password-that-is-never-used";
+  let compareSpy;
+
+  const storedHash = (name) => JSON.parse(fs.readFileSync(usersFile(), "utf-8"))[name.toLowerCase()].passwordHash;
+
+  beforeEach(() => {
+    compareSpy = vi.spyOn(bcrypt, "compare");
+  });
+
+  afterEach(() => {
+    compareSpy.mockRestore();
+  });
+
+  it("runs exactly one bcrypt comparison for an unknown username", async () => {
+    await expect(users.loginUser("ghost", "whatever123")).rejects.toThrow("Invalid username or password");
+
+    expect(compareSpy).toHaveBeenCalledTimes(1);
+    const [password, hash] = compareSpy.mock.calls[0];
+    expect(password).toBe("whatever123");
+    expect(hash).toMatch(/^\$2[aby]\$10\$/); // a real bcrypt hash, not a shortcut
+  });
+
+  it("runs exactly one comparison against the stored hash for a known user", async () => {
+    await users.registerUser("known1", "correctpassword");
+    const stored = storedHash("known1");
+    compareSpy.mockClear();
+
+    await expect(users.loginUser("known1", "wrongpassword")).rejects.toThrow("Invalid username or password");
+    await users.loginUser("known1", "correctpassword");
+
+    expect(compareSpy).toHaveBeenCalledTimes(2);
+    expect(compareSpy.mock.calls.map((call) => call[1])).toEqual([stored, stored]);
+  });
+
+  it("compares unknown usernames against a hash with the same cost as real ones", async () => {
+    await users.registerUser("known2", "correctpassword");
+    await expect(users.loginUser("nobody2", "whatever123")).rejects.toThrow();
+
+    const placeholder = compareSpy.mock.calls.at(-1)[1];
+    expect(bcrypt.getRounds(placeholder)).toBe(bcrypt.getRounds(storedHash("known2")));
+  });
+
+  it("gives the same error for an unknown user and a wrong password", async () => {
+    await users.registerUser("known3", "correctpassword");
+    const unknown = await users.loginUser("nobody3", "wrongpassword").catch((e) => e.message);
+    const wrong = await users.loginUser("known3", "wrongpassword").catch((e) => e.message);
+    expect(unknown).toBe(wrong);
+  });
+
+  it("never logs in an unknown username, even with the placeholder hash's own password", async () => {
+    await expect(users.loginUser("nobody4", PLACEHOLDER_PASSWORD)).rejects.toThrow("Invalid username or password");
+  });
+
+  it("does not let an entry without a password hash be logged into with the placeholder password", async () => {
+    // A hand-edited or damaged users.json must not turn the placeholder
+    // password (which is public in the source) into a working credential.
+    fs.writeFileSync(
+      usersFile(),
+      JSON.stringify({
+        nohash: { username: "nohash" },
+        nullhash: { username: "nullhash", passwordHash: null },
+        numberhash: { username: "numberhash", passwordHash: 12345 },
+      })
+    );
+
+    for (const name of ["nohash", "nullhash", "numberhash"]) {
+      await expect(users.loginUser(name, PLACEHOLDER_PASSWORD)).rejects.toThrow("Invalid username or password");
+      await expect(users.loginUser(name, "password123")).rejects.toThrow("Invalid username or password");
+    }
+  });
+
+  it("reports a malformed stored hash as an ordinary failed login, not an internal error", async () => {
+    fs.writeFileSync(usersFile(), JSON.stringify({ garbled: { username: "garbled", passwordHash: "not-a-bcrypt-hash" } }));
+    await expect(users.loginUser("garbled", "password123")).rejects.toThrow("Invalid username or password");
+  });
+
+  it("takes comparable time for known and unknown usernames", async () => {
+    await users.registerUser("timed1", "correctpassword");
+    const time = async (name) => {
+      const start = performance.now();
+      await users.loginUser(name, "wrongpassword1").catch(() => {});
+      return performance.now() - start;
+    };
+
+    const known = [];
+    const unknown = [];
+    for (let i = 0; i < 4; i++) {
+      // interleaved, so any drift in machine load hits both sides equally
+      known.push(await time("timed1"));
+      unknown.push(await time(`nobody-timed-${i}`));
+    }
+    const mean = (values) => values.reduce((sum, v) => sum + v, 0) / values.length;
+
+    // Was ~28x before the fix; a generous bound keeps this stable on busy CI machines.
+    expect(mean(known) / mean(unknown)).toBeLessThan(2.5);
   });
 });
 

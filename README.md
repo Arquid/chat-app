@@ -144,6 +144,7 @@ Lint, an audit of the production dependencies (`npm audit --omit=dev --audit-lev
 - A message can only attach an image its sender uploaded themselves, and each upload can be attached once; deleting a message removes only its own image file
 - Socket event handlers ignore malformed payloads (null, wrong types, keys such as `toString`) instead of throwing, so one bad client message cannot take the server down for everyone
 - User registration saves accounts atomically, so simultaneous signups cannot overwrite each other
+- A failed login costs one bcrypt comparison and gives the same answer whether the username exists or not, so response timing does not reveal which usernames are registered (registration still reports names that are taken)
 - Login/register are rate-limited (10 requests / 15 min / IP) to slow down brute-force attempts
 - Sending, editing, deleting and reacting share one budget per user across all of their connections (5 per 10 s), and a user can have at most 5 simultaneous connections (a sixth is refused with "Too many connections")
 - Room creation is limited to 3 per minute and 5 rooms per user (50 in total), so one user cannot fill every room slot
