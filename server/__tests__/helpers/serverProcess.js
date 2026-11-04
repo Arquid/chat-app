@@ -30,7 +30,7 @@ function freePort() {
 // Starts the real server (server/index.js) as a child process inside a
 // throwaway working directory, so its users/messages/uploads files, rate
 // limiters and any crash are isolated from every other test.
-export async function startServer({ seed = {}, files = {} } = {}) {
+export async function startServer({ seed = {}, files = {}, env = {} } = {}) {
   const port = await freePort();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chatapp-integration-"));
   fs.mkdirSync(path.join(dir, "server"));
@@ -44,7 +44,17 @@ export async function startServer({ seed = {}, files = {} } = {}) {
 
   const proc = spawn(process.execPath, [SERVER_ENTRY], {
     cwd: dir,
-    env: { ...process.env, PORT: String(port), JWT_SECRET, CLIENT_ORIGIN: "http://localhost:5173" },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      JWT_SECRET,
+      CLIENT_ORIGIN: "http://localhost:5173",
+      // Per-user limits are generous by default so tests that reuse one account
+      // are not throttled; the tests that exercise the limits override these.
+      MESSAGE_RATE_LIMIT: "1000",
+      MAX_CONNECTIONS_PER_USER: "100",
+      ...env,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
 

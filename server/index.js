@@ -16,13 +16,30 @@ import { loadUploads, saveUploads } from "./uploads.js";
 import { toggleReaction } from "./reactions.js";
 import { safeHandler } from "./safeHandler.js";
 import { isValidUsername, isValidPassword, isValidMessage, isValidRoomName, parseImagePath, MAX_TEXT_LENGTH } from "./validation.js";
+import { loadRoomOwners, saveRoomOwners } from "./roomOwners.js";
+import { createRateLimiter } from "./rateLimiter.js";
 
 const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 
 const MAX_HISTORY = 200;
 const MAX_ROOMS = 50;
+const MAX_ROOMS_PER_USER = 5;
+// Overridable through the environment only so integration tests can use
+// generous values; the defaults are the real limits.
+const MESSAGE_RATE_LIMIT = Number(process.env.MESSAGE_RATE_LIMIT) || 5;
+const MAX_CONNECTIONS_PER_USER = Number(process.env.MAX_CONNECTIONS_PER_USER) || 5;
+
 let rooms = loadRooms();
+const roomOwners = loadRoomOwners();
+
+// One budget per account, shared by every connection the user has open.
+const messageLimiter = createRateLimiter({ limit: MESSAGE_RATE_LIMIT, windowMs: 10_000 });
+const roomLimiter = createRateLimiter({ limit: 3, windowMs: 60_000 });
+setInterval(() => {
+  messageLimiter.sweep();
+  roomLimiter.sweep();
+}, 60_000).unref();
 
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGIN }));
@@ -187,15 +204,28 @@ const io = new Server(server, {
   },
 });
 
+function countConnections(username) {
+  let count = 0;
+  for (const connected of io.sockets.sockets.values()) {
+    if (connected.data.username === username) count++;
+  }
+  return count;
+}
+
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
   if (!token) return next(new Error("Authentication required"));
   try {
     socket.data.username = verifyToken(token).username;
-    next();
   } catch {
-    next(new Error("Invalid or expired token"));
+    return next(new Error("Invalid or expired token"));
   }
+
+  // The new socket is not in io.sockets yet, so this counts only existing ones.
+  if (countConnections(socket.data.username) >= MAX_CONNECTIONS_PER_USER) {
+    return next(new Error("Too many connections"));
+  }
+  next();
 });
 
 function getRoomUsers(room) {
@@ -215,22 +245,14 @@ function broadcastRoomUsers(room) {
 }
 
 io.on('connection', (socket) => {
-  const MESSAGE_RATE_LIMIT = 5;
-  const MESSAGE_RATE_WINDOW_MS = 10000;
-  const messageTimestamps = [];
+  const limiterKey = socket.data.username.toLowerCase();
 
-  // Shared budget for sending, editing, and deleting messages so none of
-  // them can be used to route around the others' rate limit.
+  // Shared budget for sending, editing, deleting and reacting, per account.
   function checkRateLimit() {
-    const now = Date.now();
-    while (messageTimestamps.length && now - messageTimestamps[0] > MESSAGE_RATE_WINDOW_MS) {
-      messageTimestamps.shift();
-    }
-    if (messageTimestamps.length >= MESSAGE_RATE_LIMIT) {
+    if (!messageLimiter.take(limiterKey)) {
       socket.emit("rateLimitExceeded", { message: "You're sending messages too fast" });
       return false;
     }
-    messageTimestamps.push(now);
     return true;
   }
 
@@ -253,6 +275,10 @@ io.on('connection', (socket) => {
   broadcastRoomUsers(defaultRoom);
 
   on("createRoom", (roomName) => {
+    if (!roomLimiter.take(limiterKey)) {
+      socket.emit("roomError", { message: "You're creating rooms too fast" });
+      return;
+    }
     if (!isValidRoomName(roomName)) {
       socket.emit("roomError", { message: "Room names must be 2-30 characters (letters, numbers, _ or -)" });
       return;
@@ -266,8 +292,16 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const ownedCount = [...roomOwners.values()].filter((owner) => owner === socket.data.username).length;
+    if (ownedCount >= MAX_ROOMS_PER_USER) {
+      socket.emit("roomError", { message: `You can create at most ${MAX_ROOMS_PER_USER} rooms` });
+      return;
+    }
+
     rooms.push(roomName);
+    roomOwners.set(roomName, socket.data.username);
     saveRooms(rooms);
+    saveRoomOwners(roomOwners);
     io.emit("roomList", rooms);
   }, ANY_PAYLOAD);
 

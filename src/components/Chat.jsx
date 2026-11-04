@@ -54,6 +54,10 @@ function Chat({ username, token, onLogout }) {
         onLogout();
         return;
       }
+      if (err.message === "Too many connections") {
+        alert("You have too many chat tabs open. Close one and refresh.");
+        return;
+      }
       alert("Failed to connect to chat server. Please refresh.");
     });
 

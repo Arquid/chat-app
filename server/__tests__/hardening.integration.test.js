@@ -253,3 +253,172 @@ describe("simultaneous registrations", () => {
     expect(Object.keys(stored).sort()).toEqual(names);
   });
 });
+
+describe("limits belong to the account, not the connection", () => {
+  let server;
+  let tokens;
+  let bob;
+  const clients = [];
+
+  const connect = async (token) => {
+    const client = await connectClient(server, token);
+    clients.push(client);
+    return client;
+  };
+
+  beforeAll(async () => {
+    // The real defaults: 5 messages per 10 s and 5 connections per user.
+    server = await startServer({ env: { MESSAGE_RATE_LIMIT: "5", MAX_CONNECTIONS_PER_USER: "5" } });
+    tokens = {};
+    for (const name of ["alice", "bob", "carol", "dave", "erin", "frank", "grace"]) {
+      tokens[name] = await register(server, name);
+    }
+    bob = await connect(tokens.bob);
+  });
+
+  afterAll(async () => {
+    clients.forEach((c) => c.close());
+    await server.stop();
+  });
+
+  it("shares one message budget across all of a user's connections", async () => {
+    const sockets = await Promise.all([1, 2, 3, 4].map(() => connect(tokens.alice)));
+    sockets.forEach((c, i) => {
+      for (let k = 0; k < 5; k++) c.socket.emit("sendMessage", { text: `multi ${i}-${k}` });
+    });
+    await sleep(600);
+
+    expect(delivered(bob).filter((m) => m.text.startsWith("multi"))).toHaveLength(5);
+    expect(sockets.flatMap((c) => eventsOf(c, "rateLimitExceeded"))).toHaveLength(15);
+  });
+
+  it("does not throttle other users because one user used up their budget", async () => {
+    // alice has exhausted her budget in the previous test, within the same 10 s window
+    const message = await sendAndWait(bob, bob, { text: "bob is unaffected" });
+    expect(message.username).toBe("bob");
+    expect(eventsOf(bob, "rateLimitExceeded")).toEqual([]);
+  });
+
+  it("counts sends, edits, reactions and deletes against the same budget", async () => {
+    const grace = await connect(tokens.grace);
+    let target;
+    for (const text of ["g1", "g2", "g3"]) {
+      const sent = await sendAndWait(grace, bob, { text });
+      target ??= sent;
+    }
+
+    grace.socket.emit("toggleReaction", { id: target.id, emoji: "👍" }); // 4th action
+    grace.socket.emit("editMessage", { id: target.id, text: "g1 edited" }); // 5th action
+    await waitFor(() => eventsOf(grace, "messageEdited").length === 1);
+    expect(eventsOf(grace, "reactionUpdated")).toHaveLength(1);
+    expect(eventsOf(grace, "rateLimitExceeded")).toEqual([]);
+
+    grace.socket.emit("deleteMessage", { id: target.id }); // 6th action within 10 s
+    await waitFor(() => eventsOf(grace, "rateLimitExceeded").length === 1);
+    await sleep(200);
+    expect(eventsOf(bob, "messageDeleted")).toEqual([]);
+  });
+
+  it("refuses a sixth simultaneous connection for one user and frees the slot on disconnect", async () => {
+    const open = [];
+    for (let i = 0; i < 5; i++) open.push(await connect(tokens.carol));
+
+    await expect(connectClient(server, tokens.carol)).rejects.toThrow("Too many connections");
+
+    open.pop().close();
+    const again = await waitFor(() => connectClient(server, tokens.carol).catch(() => null));
+    clients.push(again);
+    expect(again.socket.connected).toBe(true);
+  });
+
+  it("keeps the connection cap even when many connections arrive at the same moment", async () => {
+    const attempts = await Promise.allSettled(Array.from({ length: 10 }, () => connectClient(server, tokens.erin)));
+    const accepted = attempts.filter((a) => a.status === "fulfilled");
+    const refused = attempts.filter((a) => a.status === "rejected");
+    accepted.forEach((a) => clients.push(a.value));
+
+    expect(accepted).toHaveLength(5);
+    expect(refused).toHaveLength(5);
+    expect(refused.every((a) => a.reason.message === "Too many connections")).toBe(true);
+  });
+
+  it("limits room creation to 3 per minute per user", async () => {
+    const dave = await connect(tokens.dave);
+    ["room-a", "room-b", "room-c", "room-d"].forEach((name) => dave.socket.emit("createRoom", name));
+
+    const error = await waitFor(() => eventsOf(dave, "roomError")[0]);
+    expect(error.message).toBe("You're creating rooms too fast");
+    expect(eventsOf(dave, "roomError")).toHaveLength(1);
+    expect(eventsOf(dave, "roomList").at(-1)).toEqual(["general", "room-a", "room-b", "room-c"]);
+  });
+
+  it("counts invalid room names against the room budget too", async () => {
+    const frank = await connect(tokens.frank);
+    ["x", "y", "z", "w"].forEach((name) => frank.socket.emit("createRoom", name)); // all too short
+
+    await waitFor(() => eventsOf(frank, "roomError").length === 4);
+    const messages = eventsOf(frank, "roomError").map((e) => e.message);
+    expect(messages.slice(0, 3).every((m) => m.startsWith("Room names must be"))).toBe(true);
+    expect(messages[3]).toBe("You're creating rooms too fast");
+  });
+});
+
+describe("room quota per user", () => {
+  let server;
+  const clients = [];
+
+  beforeAll(async () => {
+    server = await startServer({
+      seed: {
+        "rooms.json": ["general", "r1", "r2", "r3", "r4", "r5"],
+        "roomOwners.json": { r1: "alice", r2: "alice", r3: "alice", r4: "alice", r5: "alice" },
+      },
+    });
+  });
+
+  afterAll(async () => {
+    clients.forEach((c) => c.close());
+    await server.stop();
+  });
+
+  const join = async (name) => {
+    const client = await connectClient(server, await register(server, name));
+    clients.push(client);
+    return client;
+  };
+
+  it("stops a user who already owns five rooms, but not other users", async () => {
+    const alice = await join("alice");
+    const bob = await join("bob");
+
+    alice.socket.emit("createRoom", "r6");
+    const error = await waitFor(() => eventsOf(alice, "roomError")[0]);
+    expect(error.message).toBe("You can create at most 5 rooms");
+    expect(eventsOf(alice, "roomList").at(-1)).not.toContain("r6");
+
+    bob.socket.emit("createRoom", "bobs-room");
+    await waitFor(() => eventsOf(bob, "roomList").at(-1)?.includes("bobs-room"));
+    expect(eventsOf(bob, "roomError")).toEqual([]);
+
+    const owners = JSON.parse(fs.readFileSync(server.path("server", "roomOwners.json"), "utf-8"));
+    expect(owners["bobs-room"]).toBe("bob");
+    expect(owners.r1).toBe("alice");
+  });
+
+  it("does not count rooms that have no owner, such as general", async () => {
+    const heidi = await join("heidi");
+    heidi.socket.emit("createRoom", "heidis-room");
+    await waitFor(() => eventsOf(heidi, "roomList").at(-1)?.includes("heidis-room"));
+    expect(eventsOf(heidi, "roomError")).toEqual([]);
+  });
+
+  it("records the owner of a room named after an Object.prototype member", async () => {
+    const ivan = await join("ivan");
+    ivan.socket.emit("createRoom", "__proto__");
+    await waitFor(() => eventsOf(ivan, "roomList").at(-1)?.includes("__proto__"));
+
+    const owners = JSON.parse(fs.readFileSync(server.path("server", "roomOwners.json"), "utf-8"));
+    expect(Object.keys(owners)).toContain("__proto__");
+    expect(Object.getOwnPropertyDescriptor(owners, "__proto__").value).toBe("ivan");
+  });
+});

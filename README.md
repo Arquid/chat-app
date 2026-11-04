@@ -42,7 +42,7 @@ A real-time, multi-room chat application built with **React**, **Socket.io**, an
 | Server | Node.js, Express 5, Socket.io |
 | Auth | JWT (`jsonwebtoken`), password hashing (`bcryptjs`) |
 | Uploads | `multer` |
-| Rate limiting | `express-rate-limit` + a custom per-socket limiter for messages |
+| Rate limiting | `express-rate-limit` for HTTP + a custom per-user sliding-window limiter (`server/rateLimiter.js`) for socket events |
 | Testing | Vitest, React Testing Library |
 | CI | GitHub Actions (lint, test, build on every push/PR to `main`) |
 
@@ -67,6 +67,9 @@ server/
   messages.json      Chat history store (created at runtime, not committed)
   uploads.js        Upload registry (who uploaded which image)
   uploads.json       Upload registry store (created at runtime, not committed)
+  rateLimiter.js    Per-user sliding-window rate limiter used for messages and room creation
+  roomOwners.js     Room ownership store (who created which room, for the per-user room quota)
+  roomOwners.json    Room ownership data (created at runtime, not committed)
   reactions.js      Reaction toggling that is safe for client-supplied keys
   safeHandler.js    Wrapper that keeps a malformed socket message from crashing the server
   validation.js     Shared input validation (username, password, room, message, image path)
@@ -142,10 +145,12 @@ Lint, an audit of the production dependencies (`npm audit --omit=dev --audit-lev
 - Socket event handlers ignore malformed payloads (null, wrong types, keys such as `toString`) instead of throwing, so one bad client message cannot take the server down for everyone
 - User registration saves accounts atomically, so simultaneous signups cannot overwrite each other
 - Login/register are rate-limited (10 requests / 15 min / IP) to slow down brute-force attempts
-- Outgoing chat messages are rate-limited per connection (5 messages / 10s)
+- Sending, editing, deleting and reacting share one budget per user across all of their connections (5 per 10 s), and a user can have at most 5 simultaneous connections (a sixth is refused with "Too many connections")
+- Room creation is limited to 3 per minute and 5 rooms per user (50 in total), so one user cannot fill every room slot
 
 ## Known limitations
 
 - JWTs cannot be revoked server-side; logging out only discards the token on the client, it stays valid until it expires (7 days)
 - Chat history, rooms, and user accounts are stored as JSON files on disk rather than in a real database — this survives a server restart but won't hold up under concurrent writes at higher traffic
-- Any authenticated user can create a room (capped at 50 rooms); there's no per-room access control or moderation
+- Rooms cannot be deleted, and there is no per-room access control or moderation. Rooms created before the per-user quota existed (such as `general`) have no owner and count toward nobody's quota
+- The rate limits are kept in memory, so they reset when the server restarts and would not be shared between several server processes
