@@ -124,7 +124,7 @@ function releaseImage(imagePath) {
 
   delete uploads[fileName];
   saveUploads(uploads);
-  fs.unlink(path.join("uploads", fileName), () => {});
+  fs.unlink(path.join(UPLOADS_DIR, fileName), () => {});
 }
 
 function trimRoomHistory(room) {
