@@ -28,13 +28,16 @@ function freePort() {
 }
 
 // Starts the real server (server/index.js) as a child process inside a
-// throwaway working directory, so its users/messages/uploads files, rate
-// limiters and any crash are isolated from every other test.
-export async function startServer({ seed = {}, files = {}, env = {} } = {}) {
+// throwaway data directory (DATA_DIR), so its users/messages/uploads files, rate
+// limiters and any crash are isolated from every other test. The process runs
+// from a different, empty directory (`cwd`), so any file path that still depends
+// on the working directory shows up as a failing test instead of passing by luck.
+export async function startServer({ seed = {}, files = {}, env = {}, cwd } = {}) {
   const port = await freePort();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chatapp-integration-"));
   fs.mkdirSync(path.join(dir, "server"));
   fs.mkdirSync(path.join(dir, "uploads"));
+  const workDir = cwd ?? fs.mkdtempSync(path.join(os.tmpdir(), "chatapp-cwd-"));
   for (const [name, content] of Object.entries(seed)) {
     fs.writeFileSync(path.join(dir, "server", name), JSON.stringify(content));
   }
@@ -43,11 +46,12 @@ export async function startServer({ seed = {}, files = {}, env = {} } = {}) {
   }
 
   const proc = spawn(process.execPath, [SERVER_ENTRY], {
-    cwd: dir,
+    cwd: workDir,
     env: {
       ...process.env,
       PORT: String(port),
       JWT_SECRET,
+      DATA_DIR: dir,
       CLIENT_ORIGIN: "http://localhost:5173",
       // Per-user limits are generous by default so tests that reuse one account
       // are not throttled; the tests that exercise the limits override these.
@@ -73,6 +77,7 @@ export async function startServer({ seed = {}, files = {}, env = {} } = {}) {
   return {
     port,
     dir,
+    cwd: workDir,
     url: `http://localhost:${port}`,
     isAlive: () => proc.exitCode === null,
     logs: () => output,
@@ -81,6 +86,7 @@ export async function startServer({ seed = {}, files = {}, env = {} } = {}) {
       proc.kill();
       await exited;
       fs.rmSync(dir, { recursive: true, force: true });
+      if (!cwd) fs.rmSync(workDir, { recursive: true, force: true });
     },
   };
 }

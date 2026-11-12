@@ -9,13 +9,14 @@ let uploadsModule;
 beforeAll(async () => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chatapp-uploads-test-"));
   fs.mkdirSync(path.join(tempRoot, "server"));
-  vi.spyOn(process, "cwd").mockReturnValue(tempRoot);
+  process.env.DATA_DIR = tempRoot;
 
   uploadsModule = await import("../uploads.js");
 });
 
 afterAll(() => {
   vi.restoreAllMocks();
+  delete process.env.DATA_DIR;
   fs.rmSync(tempRoot, { recursive: true, force: true });
 });
 

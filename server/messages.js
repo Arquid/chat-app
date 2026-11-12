@@ -1,7 +1,9 @@
 import fs from "fs";
 import path from "path";
 
-const MESSAGES_FILE = path.join(process.cwd(), "server", "messages.json");
+import { SERVER_DATA_DIR } from "./paths.js";
+
+const MESSAGES_FILE = path.join(SERVER_DATA_DIR, "messages.json");
 
 export function loadMessages() {
   if (!fs.existsSync(MESSAGES_FILE)) return [];

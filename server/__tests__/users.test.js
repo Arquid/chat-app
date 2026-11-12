@@ -4,9 +4,10 @@ import os from "os";
 import path from "path";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { UserError } from "../errors.js";
 
-// users.js resolves its storage path from process.cwd() at import time, so
-// point cwd at a throwaway temp directory before importing it. This keeps
+// users.js resolves its storage path (via paths.js) from DATA_DIR at import time,
+// so point DATA_DIR at a throwaway temp directory before importing it. This keeps
 // tests off the real server/users.json and isolated from each other.
 let tempRoot;
 let users;
@@ -14,13 +15,14 @@ let users;
 beforeAll(async () => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chatapp-users-test-"));
   fs.mkdirSync(path.join(tempRoot, "server"));
-  vi.spyOn(process, "cwd").mockReturnValue(tempRoot);
+  process.env.DATA_DIR = tempRoot;
 
   users = await import("../users.js");
 });
 
 afterAll(() => {
   vi.restoreAllMocks();
+  delete process.env.DATA_DIR;
   fs.rmSync(tempRoot, { recursive: true, force: true });
 });
 
@@ -221,6 +223,43 @@ describe("login does not reveal whether a username exists", () => {
 
     // Was ~28x before the fix; a generous bound keeps this stable on busy CI machines.
     expect(mean(known) / mean(unknown)).toBeLessThan(2.5);
+  });
+});
+
+// The HTTP layer shows a message to the user only when it comes from a UserError.
+// Everything else (damaged files, disk errors) must stay distinguishable from it,
+// otherwise it would be reported as "username taken" or "wrong password".
+describe("expected and unexpected failures can be told apart", () => {
+  it("reports a taken username as a UserError with status 409", async () => {
+    await users.registerUser("taken1", "password123");
+    const error = await users.registerUser("TAKEN1", "password123").catch((e) => e);
+
+    expect(error).toBeInstanceOf(UserError);
+    expect(error).toMatchObject({ message: "Username already taken", status: 409 });
+  });
+
+  it("reports a failed login as a UserError with status 401, for a wrong password and an unknown user alike", async () => {
+    await users.registerUser("known9", "correctpassword");
+    const wrong = await users.loginUser("known9", "wrongpassword").catch((e) => e);
+    const unknown = await users.loginUser("nobody9", "wrongpassword").catch((e) => e);
+
+    for (const error of [wrong, unknown]) {
+      expect(error).toBeInstanceOf(UserError);
+      expect(error).toMatchObject({ message: "Invalid username or password", status: 401 });
+    }
+  });
+
+  it("does not report a damaged users.json as a UserError", async () => {
+    fs.writeFileSync(usersFile(), "{ not json");
+
+    const register = await users.registerUser("anyone", "password123").catch((e) => e);
+    const login = await users.loginUser("anyone", "password123").catch((e) => e);
+
+    for (const error of [register, login]) {
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(UserError);
+      expect(error.status).toBeUndefined();
+    }
   });
 });
 

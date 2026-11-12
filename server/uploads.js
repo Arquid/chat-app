@@ -1,7 +1,9 @@
 import fs from "fs";
 import path from "path";
 
-const UPLOADS_FILE = path.join(process.cwd(), "server", "uploads.json");
+import { SERVER_DATA_DIR } from "./paths.js";
+
+const UPLOADS_FILE = path.join(SERVER_DATA_DIR, "uploads.json");
 
 // Registry of uploaded images: { "<uuid>.png": { owner, createdAt, used } }.
 // It lets the server check that a message only references an image its own

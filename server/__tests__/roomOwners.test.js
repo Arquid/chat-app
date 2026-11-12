@@ -9,13 +9,14 @@ let owners;
 beforeAll(async () => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chatapp-owners-test-"));
   fs.mkdirSync(path.join(tempRoot, "server"));
-  vi.spyOn(process, "cwd").mockReturnValue(tempRoot);
+  process.env.DATA_DIR = tempRoot;
 
   owners = await import("../roomOwners.js");
 });
 
 afterAll(() => {
   vi.restoreAllMocks();
+  delete process.env.DATA_DIR;
   fs.rmSync(tempRoot, { recursive: true, force: true });
 });
 

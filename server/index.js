@@ -8,6 +8,7 @@ import cors from 'cors';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import rateLimit from "express-rate-limit";
+import helmet from "helmet";
 
 import { registerUser, loginUser, verifyToken } from "./users.js";
 import { loadMessages, saveMessages } from "./messages.js";
@@ -18,6 +19,8 @@ import { safeHandler } from "./safeHandler.js";
 import { isValidUsername, isValidPassword, isValidMessage, isValidRoomName, parseImagePath, MAX_TEXT_LENGTH } from "./validation.js";
 import { loadRoomOwners, saveRoomOwners } from "./roomOwners.js";
 import { createRateLimiter } from "./rateLimiter.js";
+import { UserError } from "./errors.js";
+import { UPLOADS_DIR } from "./paths.js";
 
 const PORT = Number(process.env.PORT) || 5000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
@@ -42,9 +45,16 @@ setInterval(() => {
 }, 60_000).unref();
 
 const app = express();
+app.disable("x-powered-by");
+
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
 app.use(cors({ origin: CLIENT_ORIGIN }));
 app.use(express.json());
-app.use("/uploads", express.static("uploads"));
+app.use("/uploads", express.static(UPLOADS_DIR));
 
 // Messages saved before image references were validated may hold arbitrary
 // strings in `image`; drop anything that is not one of our own upload paths.
@@ -74,7 +84,7 @@ const uploadLimiter = rateLimit({
 });
 
 const storage = multer.diskStorage({
-  destination: "uploads/",
+  destination: UPLOADS_DIR,
   filename: (req, file, cb) => {
     const ext = MIME_TO_EXT[file.mimetype] || "";
     cb(null, `${uuidv4()}${ext}`);
@@ -114,7 +124,7 @@ function releaseImage(imagePath) {
 
   delete uploads[fileName];
   saveUploads(uploads);
-  fs.unlink(path.join("uploads", fileName), () => {}); // best-effort cleanup, ignore errors
+  fs.unlink(path.join("uploads", fileName), () => {});
 }
 
 function trimRoomHistory(room) {
@@ -141,12 +151,8 @@ app.post("/auth/register", authLimiter, async (req, res) => {
     return res.status(400).json({ error: "Password must be at least 8 characters" });
   }
 
-  try {
-    const token = await registerUser(username, password);
-    res.json({ token, username });
-  } catch (error) {
-    res.status(409).json({ error: error.message });
-  }
+  const token = await registerUser(username, password);
+  res.json({ token, username });
 });
 
 app.post("/auth/login", authLimiter, async (req, res) => {
@@ -156,12 +162,8 @@ app.post("/auth/login", authLimiter, async (req, res) => {
     return res.status(400).json({ error: "Username and password required" });
   }
 
-  try {
-    const token = await loginUser(username, password);
-    res.json({ token, username });
-  } catch (error) {
-    res.status(401).json({ error: error.message });
-  }
+  const token = await loginUser(username, password);
+  res.json({ token, username });
 });
 
 function authenticate(req, res, next) {
@@ -194,6 +196,25 @@ app.post("/upload", uploadLimiter, authenticate, (req, res) => {
     res.json({ imageUrl: `/uploads/${req.file.filename}` });
   });
 });
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+
+  if (err instanceof UserError) {
+    return res.status(err.status).json({ error: err.message });
+  }
+  if (err.type === "entity.parse.failed") {
+    return res.status(400).json({ error: "Invalid JSON" });
+  }
+  if (err.type === "entity.too.large") {
+    return res.status(413).json({ error: "Request body too large" });
+  }
+
+  console.error(`${req.method} ${req.path} failed:`, err);
+  res.status(500).json({ error: "Internal server error" });
+});
+
+app.use((req, res) => res.status(404).json({ error: "Not found" }));
 
 const server = http.createServer(app);
 

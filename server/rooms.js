@@ -1,7 +1,9 @@
 import fs from "fs";
 import path from "path";
 
-const ROOMS_FILE = path.join(process.cwd(), "server", "rooms.json");
+import { SERVER_DATA_DIR } from "./paths.js";
+
+const ROOMS_FILE = path.join(SERVER_DATA_DIR, "rooms.json");
 const DEFAULT_ROOMS = ["general"];
 
 export function loadRooms() {

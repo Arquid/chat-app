@@ -3,7 +3,10 @@ import path from "path";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-const USERS_FILE = path.join(process.cwd(), "server", "users.json");
+import { UserError } from "./errors.js";
+import { SERVER_DATA_DIR } from "./paths.js";
+
+const USERS_FILE = path.join(SERVER_DATA_DIR, "users.json");
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = "7d";
 const BCRYPT_ROUNDS = 10;
@@ -55,7 +58,7 @@ export async function registerUser(username, password) {
 
   const users = loadUsers();
   if (findUser(users, key)) {
-    throw new Error("Username already taken");
+    throw new UserError("Username already taken", 409);
   }
 
   users[key] = { username, passwordHash };
@@ -78,7 +81,7 @@ export async function loginUser(username, password) {
   const passwordMatches = await bcrypt.compare(password, storedHash ?? DUMMY_HASH);
 
   if (!storedHash || !passwordMatches) {
-    throw new Error("Invalid username or password");
+    throw new UserError("Invalid username or password", 401);
   }
 
   return generateToken(user.username);

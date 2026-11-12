@@ -40,6 +40,7 @@ A real-time, multi-room chat application built with **React**, **Socket.io**, an
 |---|---|
 | Client | React 19, Vite |
 | Server | Node.js, Express 5, Socket.io |
+| HTTP hardening | `helmet` security headers, one central error handler (`server/index.js`) |
 | Auth | JWT (`jsonwebtoken`), password hashing (`bcryptjs`) |
 | Uploads | `multer` |
 | Rate limiting | `express-rate-limit` for HTTP + a custom per-user sliding-window limiter (`server/rateLimiter.js`) for socket events |
@@ -73,6 +74,8 @@ server/
   reactions.js      Reaction toggling that is safe for client-supplied keys
   safeHandler.js    Wrapper that keeps a malformed socket message from crashing the server
   validation.js     Shared input validation (username, password, room, message, image path)
+  errors.js         UserError: the only kind of error whose message is shown to the client
+  paths.js          Where data files and uploads live (the repository, or DATA_DIR), independent of the working directory
   __tests__/        Server-side unit and integration tests (the integration tests start the real server)
 
 uploads/             Uploaded images (not committed)
@@ -103,11 +106,13 @@ cp .env.example .env
 | `CLIENT_ORIGIN` | server | Allowed CORS origin for HTTP and Socket.io requests (default `http://localhost:5173`) |
 | `VITE_SERVER_URL` | client | Base URL the browser uses to reach the server (default `http://localhost:5000`) |
 | `JWT_SECRET` | server | Secret used to sign session tokens. Generate one with: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `NODE_ENV` | server | Set to `production` when deploying (`.env.example` does). Error responses never include stack traces or file paths, whatever its value |
+| `DATA_DIR` | server | Optional. Directory that holds `server/*.json` and `uploads/`. Defaults to the repository root, so the server can be started from any directory. Relative paths are resolved against the working directory |
 
 ### Run
 
 ```bash
-# Terminal 1 - server
+# Terminal 1 - server (works from any directory; data stays in the repository unless DATA_DIR is set)
 node server/index.js
 
 # Terminal 2 - client
@@ -121,7 +126,7 @@ npm test           # run once
 npm run test:watch # watch mode
 ```
 
-Covers server-side auth/validation/persistence logic (`server/__tests__/`) and client-side login/register/chat/room behavior (`src/__tests__/`, `src/components/__tests__/`), using [Vitest](https://vitest.dev/) and [React Testing Library](https://testing-library.com/react). `server/__tests__/hardening.integration.test.js` starts the real server as a child process and checks that malformed client messages cannot crash it, that uploads cannot be claimed by other users, and that concurrent registrations are all saved.
+Covers server-side auth/validation/persistence logic (`server/__tests__/`) and client-side login/register/chat/room behavior (`src/__tests__/`, `src/components/__tests__/`), using [Vitest](https://vitest.dev/) and [React Testing Library](https://testing-library.com/react). `server/__tests__/hardening.integration.test.js` starts the real server as a child process and checks that malformed client messages cannot crash it, that uploads cannot be claimed by other users, and that concurrent registrations are all saved. `server/__tests__/httpHardening.integration.test.js` checks the security headers, that errors never expose stack traces or file paths, and that the server keeps its files in `DATA_DIR` whatever directory it was started from. The integration tests always start the server from an empty working directory and a temporary `DATA_DIR`, so they never touch your real `server/*.json` files.
 
 Lint, an audit of the production dependencies (`npm audit --omit=dev --audit-level=high`), tests, and build run automatically on every push and pull request to `main` via GitHub Actions (see `.github/workflows/ci.yml`, tested against Node 20.x and 22.x). Dependabot opens weekly update PRs.
 
@@ -145,6 +150,8 @@ Lint, an audit of the production dependencies (`npm audit --omit=dev --audit-lev
 - Socket event handlers ignore malformed payloads (null, wrong types, keys such as `toString`) instead of throwing, so one bad client message cannot take the server down for everyone
 - User registration saves accounts atomically, so simultaneous signups cannot overwrite each other
 - A failed login costs one bcrypt comparison and gives the same answer whether the username exists or not, so response timing does not reveal which usernames are registered (registration still reports names that are taken)
+- Responses carry security headers (`helmet`: `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, ...) and do not announce the framework (`X-Powered-By` is removed). Uploaded images are served with `Cross-Origin-Resource-Policy: cross-origin` so the client on another port can display them
+- Errors are answered with short JSON messages. Only expected errors (`UserError`: username taken, wrong password) show their own message; broken JSON gets `400 Invalid JSON`, an oversized body `413`, an unknown route a JSON `404`, and anything unexpected (such as a damaged `users.json`) a generic `500 Internal server error` while the details go to the server log only. A failing user store is therefore never reported as "username taken" or "wrong password"
 - Login/register are rate-limited (10 requests / 15 min / IP) to slow down brute-force attempts
 - Sending, editing, deleting and reacting share one budget per user across all of their connections (5 per 10 s), and a user can have at most 5 simultaneous connections (a sixth is refused with "Too many connections")
 - Room creation is limited to 3 per minute and 5 rooms per user (50 in total), so one user cannot fill every room slot

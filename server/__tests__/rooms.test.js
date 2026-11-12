@@ -9,13 +9,14 @@ let roomsModule;
 beforeAll(async () => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "chatapp-rooms-test-"));
   fs.mkdirSync(path.join(tempRoot, "server"));
-  vi.spyOn(process, "cwd").mockReturnValue(tempRoot);
+  process.env.DATA_DIR = tempRoot;
 
   roomsModule = await import("../rooms.js");
 });
 
 afterAll(() => {
   vi.restoreAllMocks();
+  delete process.env.DATA_DIR;
   fs.rmSync(tempRoot, { recursive: true, force: true });
 });
 

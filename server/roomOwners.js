@@ -1,7 +1,9 @@
 import fs from "fs";
 import path from "path";
 
-const OWNERS_FILE = path.join(process.cwd(), "server", "roomOwners.json");
+import { SERVER_DATA_DIR } from "./paths.js";
+
+const OWNERS_FILE = path.join(SERVER_DATA_DIR, "roomOwners.json");
 
 // Who created each room: Map<roomName, username>.
 export function loadRoomOwners() {
